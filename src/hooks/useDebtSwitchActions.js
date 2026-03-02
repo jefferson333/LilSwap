@@ -86,6 +86,13 @@ export const useDebtSwitchActions = ({
     const chainId = targetNetwork.chainId;
     const targetHexChainId = targetNetwork.hexChainId;
 
+    // Clear stale permit/error state when token changes — prevents reuse of wrong token's permit
+    useEffect(() => {
+        setSignedPermit(null);
+        setTxError(null);
+        setUserRejected(false);
+    }, [fromToken?.symbol, fromToken?.address]);
+
     const ensureWalletNetwork = useCallback(async () => {
         if (!provider) {
             addLog?.('Provider unavailable. Please reconnect your wallet.', 'error');

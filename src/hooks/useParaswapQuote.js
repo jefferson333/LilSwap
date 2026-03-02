@@ -78,6 +78,16 @@ export const useParaswapQuote = ({
             return null;
         }
 
+        // Guard: same from/to address (happens briefly when switching tokens)
+        const fromAddr = (fromToken.address || fromToken.underlyingAsset || '').toLowerCase();
+        const toAddr = (toToken.address || toToken.underlyingAsset || '').toLowerCase();
+        if (fromAddr && toAddr && fromAddr === toAddr) {
+            logger.debug('[useParaswapQuote] Same from/to token, skipping quote');
+            setSwapQuote(null);
+            setAutoRefreshEnabled(false);
+            return null;
+        }
+
         if (!account) {
             logger.debug('[useParaswapQuote] No account connected');
             addLog?.('Please connect wallet to get quote', 'warning');
@@ -271,6 +281,15 @@ export const useParaswapQuote = ({
 
         if (!debouncedAmount || debouncedAmount === BigInt(0) || !fromToken || !toToken) {
             logger.debug('[useParaswapQuote] Conditions not met, clearing quote');
+            clearQuote();
+            return;
+        }
+
+        // Guard: same from/to address (happens briefly when switching tokens)
+        const fromAddr = (fromToken.address || fromToken.underlyingAsset || '').toLowerCase();
+        const toAddr = (toToken.address || toToken.underlyingAsset || '').toLowerCase();
+        if (fromAddr && toAddr && fromAddr === toAddr) {
+            logger.debug('[useParaswapQuote] Same from/to token, clearing quote');
             clearQuote();
             return;
         }

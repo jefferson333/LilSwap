@@ -1343,7 +1343,21 @@ export const DebtSwapModal = ({
                                                 key={token.underlyingAsset || token.address}
                                                 disabled={disabled}
                                                 onClick={() => {
-                                                    if (selectingForFrom) setFromToken(token); else setToToken(token);
+                                                    if (selectingForFrom) {
+                                                        setFromToken(token);
+                                                        // Batch: if current toToken matches new fromToken, pick a fallback immediately
+                                                        const newAddr = (token.underlyingAsset || token.address || '').toLowerCase();
+                                                        const curToAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
+                                                        if (curToAddr && newAddr && curToAddr === newAddr) {
+                                                            const fallback = (marketAssets || []).find((t) => {
+                                                                const tAddr = (t.underlyingAsset || t.address || '').toLowerCase();
+                                                                return tAddr && tAddr !== newAddr && t.isActive && !t.isFrozen && !t.isPaused && t.borrowingEnabled;
+                                                            }) || null;
+                                                            setToToken(fallback);
+                                                        }
+                                                    } else {
+                                                        setToToken(token);
+                                                    }
                                                     setSelectingForFrom(false);
                                                     setTokenSelectorOpen(false);
                                                 }}
