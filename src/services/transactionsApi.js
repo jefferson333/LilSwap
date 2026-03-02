@@ -1,6 +1,6 @@
 /**
  * Transactions API Service (Frontend)
- * Comunica com backend para registrar e rastrear transações
+ * Communicates with backend to register and track transactions
  */
 
 import logger from '../utils/logger.js';
@@ -8,8 +8,8 @@ import logger from '../utils/logger.js';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/v1';
 
 /**
- * Atualiza o backend com o txHash após user enviar ao blockchain
- * @param {number} transactionId - ID retornado por buildDebtSwapTx
+ * Updates backend with txHash after user sends to blockchain
+ * @param {number} transactionId - ID returned by buildDebtSwapTx
  * @param {string} txHash - Transaction hash
  * @returns {Promise<boolean>}
  */
@@ -39,11 +39,11 @@ export async function recordTransactionHash(transactionId, txHash) {
 }
 
 /**
- * Confirma a transação no backend após on-chain confirmation
+ * Confirms the transaction on backend after on-chain confirmation
  * @param {number} transactionId
  * @param {Object} confirmData
  * @param {number} confirmData.gasUsed
- * @param {number} confirmData.actualPaid - Debt amount efetivamente pago (wei)
+ * @param {number} confirmData.actualPaid - Actual debt amount paid (wei)
  * @returns {Promise<boolean>}
  */
 export async function confirmTransactionOnChain(transactionId, confirmData) {
@@ -82,15 +82,15 @@ export async function confirmTransactionOnChain(transactionId, confirmData) {
 }
 
 /**
- * Obtém o histórico de transações do usuário
- * @param {string} userAddress
+ * Gets user transaction history
+ * @param {string} walletAddress
  * @param {number} limit
  * @returns {Promise<Array>}
  */
-export async function getUserTransactionHistory(userAddress, limit = 50) {
+export async function getUserTransactionHistory(walletAddress, limit = 50) {
     try {
         const response = await fetch(
-            `${API_URL}/transactions/user/${userAddress}?limit=${limit}`,
+            `${API_URL}/transactions/user/${walletAddress}?limit=${limit}`,
             { headers: { 'Content-Type': 'application/json' } }
         );
 
@@ -109,7 +109,7 @@ export async function getUserTransactionHistory(userAddress, limit = 50) {
 
 
 /**
- * Marca uma transação como rejeitada pelo usuário
+ * Marks a transaction as rejected by user
  */
 export async function rejectTransaction(transactionId, reason) {
     try {
@@ -132,7 +132,7 @@ export async function rejectTransaction(transactionId, reason) {
 }
 
 /**
- * Marca manualmente como falhada (debbuging/fallback)
+ * Manually marks transaction as failed (debugging/fallback)
  */
 export async function failTransaction(transactionId, reason) {
     try {

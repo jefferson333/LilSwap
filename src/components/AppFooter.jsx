@@ -4,7 +4,7 @@ import { useApiMeta } from '../context/ApiMetaContext.jsx';
 const APP_VERSION = __APP_VERSION__;
 
 const AppFooter = () => {
-    const { apiVersion } = useApiMeta();
+    const { apiVersion, isApiUp } = useApiMeta();
 
     return (
         <footer className="sticky bottom-0 z-40 border-t border-border-light dark:border-border-dark bg-background-light/95 dark:bg-background-dark/95 backdrop-blur-sm">
@@ -19,8 +19,10 @@ const AppFooter = () => {
                             <span className="text-slate-300 dark:text-slate-700">·</span>
                             <span className="font-mono text-slate-400">API v{apiVersion}</span>
                             <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                                <span className="text-green-500 font-medium">Operational</span>
+                                <span className={`w-1.5 h-1.5 rounded-full ${isApiUp ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                                <span className={`${isApiUp ? 'text-green-500' : 'text-red-500'} font-medium`}>
+                                    {isApiUp ? 'Operational' : 'Offline'}
+                                </span>
                             </div>
                         </>
                     )}

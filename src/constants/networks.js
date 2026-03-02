@@ -207,7 +207,7 @@ export const NETWORKS = {
 
 };
 
-export const DEFAULT_NETWORK = NETWORKS.BASE;
+export const DEFAULT_NETWORK = NETWORKS.ETHEREUM;
 
 export const getNetworkByChainId = (chainId) => {
     if (!chainId && chainId !== 0) {

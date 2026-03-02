@@ -29,6 +29,7 @@ export const useDebtSwitchActions = ({
     onTxSent,
 }) => {
     const [isActionLoading, setIsActionLoading] = useState(false);
+    const [isSigning, setIsSigning] = useState(false);
     const [signedPermit, setSignedPermit] = useState(null);
     // Persisted flag: when true we WILL request a fresh off-chain permit even if on-chain allowance exists.
     // Persist to localStorage so a page reload does not silently bypass the intent of "Clear cached permits".
@@ -186,6 +187,7 @@ export const useDebtSwitchActions = ({
 
         try {
             setIsActionLoading(true);
+            setIsSigning(true);
             const signer = await provider.getSigner();
 
             // Use debt token address from backend, with fallback to on-chain
@@ -223,6 +225,7 @@ export const useDebtSwitchActions = ({
             addLog?.('Approval error: ' + (error?.message || error), 'error');
             throw error;
         } finally {
+            setIsSigning(false);
             setIsActionLoading(false);
         }
     }, [provider, toToken?.underlyingAsset, toToken?.address, addLog, fetchDebtData, networkAddresses, adapterAddress, targetNetwork.label, preferPermit, generateAndCachePermit]);
@@ -431,6 +434,7 @@ export const useDebtSwitchActions = ({
 
                         // Request & cache a new permit — prefer the returned value to avoid stale React state
                         const permitResult = await handleApproveDelegation(true);
+                        setIsActionLoading(true); // Re-assert true because handleApproveDelegation finally block clears it
 
                         if (permitResult && permitResult.permit) {
                             permitParams = permitResult.permit;
@@ -447,6 +451,7 @@ export const useDebtSwitchActions = ({
                     // User explicitly chose on-chain approval — ignore any cached signature and send tx
                     addLog?.('1/3 Sending on-chain approval (user chose on-chain)...', 'info');
                     await handleApproveDelegation(false);
+                    setIsActionLoading(true); // Re-assert true because handleApproveDelegation finally block clears it
                     // Wait a moment for allowance to update, then refetch
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     await fetchDebtData();
@@ -480,14 +485,14 @@ export const useDebtSwitchActions = ({
                     symbol: toToken.symbol,
                 },
                 priceRoute,
-                userAddress: adapterAddress,
+                adapterAddress: adapterAddress,
                 destAmount: exactDebtRepayAmount.toString(),
                 srcAmount: activeQuote.srcAmount.toString(),
                 // Pass APY from the frontend quote so backend can persist it
                 apyPercent: activeQuote?.apyPercent ?? null,
                 slippageBps: slippage,  // User's chosen slippage in BPS (e.g., 50 = 0.5%)
                 chainId,
-                userWalletAddress: account,  // Pass user's wallet for tracking
+                walletAddress: account,  // Pass user's wallet for tracking
             });
 
             const { transactionId, swapCallData: paraswapCalldata, augustus: augustusAddress, version: txVersion, bufferBps: backendBufferBps, dynamicOffset } = txResult;
@@ -977,13 +982,17 @@ export const useDebtSwitchActions = ({
                 // Confirm transaction on backend with final details
                 if (localTxId) {
                     // Record actual debt repaid (exact output) instead of the authorization ceiling
-                    await confirmTransactionOnChain(localTxId, {
-                        gasUsed: gasUsed.toString(),
-                        gasPrice: gasPrice?.toString(),
-                        txFee: fee,
-                        actualPaid: exactDebtRepayAmount.toString(),
-                        apyPercent: swapQuote?.apyPercent ?? null
-                    });
+                    try {
+                        await confirmTransactionOnChain(localTxId, {
+                            gasUsed: gasUsed.toString(),
+                            gasPrice: gasPrice?.toString(),
+                            txFee: fee,
+                            actualPaid: exactDebtRepayAmount.toString(),
+                            apyPercent: swapQuote?.apyPercent ?? null
+                        });
+                    } catch (confirmErr) {
+                        logger.warn('[handleSwap] Could not confirm tx in backend (non-critical):', confirmErr?.message);
+                    }
                 }
             }
 
@@ -1107,11 +1116,6 @@ export const useDebtSwitchActions = ({
         setLastAttemptedQuote(null);
         setTxError(null);
 
-        // Clear frontend quote so UI shows a fresh flow and the next action will re-fetch/require signature
-        if (typeof clearQuote === 'function') {
-            try { clearQuote(); } catch (err) { logger.debug('[clearCachedPermit] clearQuote failed:', err?.message || err); }
-        }
-
         addLog?.('Cached permit cleared — next swap will request a fresh signature', 'success');
 
         // Ask wallet (if available) to forget site permissions / cached approvals.
@@ -1141,10 +1145,11 @@ export const useDebtSwitchActions = ({
         } else {
             addLog?.('No injected wallet detected; clear cached permit in your wallet extension if present.', 'info');
         }
-    }, [setForceRequirePermit, clearQuote, addLog]);
+    }, [setForceRequirePermit, addLog]);
 
     return {
         isActionLoading,
+        isSigning,
         signedPermit,
         forceRequirePermit,
         txError,

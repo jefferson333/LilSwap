@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ethers } from 'ethers';
 import { ADDRESSES } from '../constants/addresses.js';
 import { DEFAULT_NETWORK } from '../constants/networks.js';
-import { getDebtQuote } from '../services/api.js';
+import { getDebtQuote, getCollateralQuote } from '../services/api.js';
 import { useDebounce } from './useDebounce.js';
 
 import logger from '../utils/logger.js';
@@ -10,25 +10,29 @@ const AUTO_REFRESH_SECONDS = 30;
 
 export const useParaswapQuote = ({
     debtAmount,
+    sellAmount,
+    isCollateral = false,
     fromToken,
     toToken,
     addLog,
     onQuoteLoaded,
     selectedNetwork,
     account,
+    adapterAddress = null,
     enabled = true,
     freezeQuote = false
 }) => {
     const [swapQuote, setSwapQuote] = useState(null);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
     const [nextRefreshIn, setNextRefreshIn] = useState(AUTO_REFRESH_SECONDS);
-    // slippage is expressed in basis points (bps) across the app: 50 = 0.5%
-    const [slippage, setSlippage] = useState(50);
+    // slippage is expressed in basis points (bps) across the app: 25 = 0.25%
+    const [slippage, setSlippage] = useState(25);
     const [isQuoteLoading, setIsQuoteLoading] = useState(false);
     const [isTyping, setIsTyping] = useState(false);
 
     // Debounce debtAmount to avoid spamming API while user types
-    const debouncedDebtAmount = useDebounce(debtAmount, 500);
+    const currentAmount = isCollateral ? sellAmount : debtAmount;
+    const debouncedAmount = useDebounce(currentAmount, 500);
 
     const resetRefreshCountdown = useCallback(() => {
         setNextRefreshIn(AUTO_REFRESH_SECONDS);
@@ -60,14 +64,14 @@ export const useParaswapQuote = ({
 
     const fetchQuote = useCallback(async () => {
         logger.debug('[useParaswapQuote] fetchQuote called', {
-            debouncedDebtAmount: debouncedDebtAmount?.toString(),
+            debouncedAmount: debouncedAmount?.toString(),
             fromToken: fromToken?.symbol,
             toToken: toToken?.symbol,
             account,
             enabled
         });
 
-        if (!debouncedDebtAmount || debouncedDebtAmount === BigInt(0) || !fromToken || !toToken) {
+        if (!debouncedAmount || debouncedAmount === BigInt(0) || !fromToken || !toToken) {
             logger.debug('[useParaswapQuote] Missing required data, skipping quote');
             setSwapQuote(null);
             setAutoRefreshEnabled(false);
@@ -87,111 +91,138 @@ export const useParaswapQuote = ({
         resetRefreshCountdown();
 
         try {
-            addLog?.(`Swapping debt: ${fromToken.symbol} -> ${toToken.symbol}...`, 'info');
-            addLog?.('Updating quote...', 'info');
-
-            // Calculate a buffer to cover APY drift while the transaction is mining
-            // If gas is slow, debt grows. The AAVE adapter will only repay up to this `destAmount`.
-            // If `destAmount` is less than actual debt, it leaves dust.
-            // We pad it by ~30 minutes of interest to guarantee it's always higher than the actual debt.
-            const apyDecimal = typeof fromToken?.variableBorrowRate === 'number'
-                ? fromToken.variableBorrowRate
-                : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate : 0.05); // Default 5%
-
-            let destAmountBigInt = BigInt(debouncedDebtAmount.toString());
-            if (destAmountBigInt > 0n) {
-                // drift = debt * (apy) * (30 minutes) / (1 year)
-                const thirtyMinSeconds = 30 * 60;
-                const yearSeconds = 365 * 24 * 60 * 60;
-
-                // Using Number for math to handle decimals, then back to BigInt
-                const rawDebt = Number(destAmountBigInt);
-                const driftBuffer = Math.ceil(rawDebt * apyDecimal * (thirtyMinSeconds / yearSeconds));
-
-                // Add the drift buffer + 1 wei safety
-                const driftBigInt = BigInt(driftBuffer) + 1n;
-                destAmountBigInt += driftBigInt;
-
-                logger.debug(`[useParaswapQuote] Added ${driftBigInt.toString()} wei to destAmount to cover up to 30min of APY drift (${(apyDecimal * 100).toFixed(2)}%)`);
-            }
-            const destAmount = destAmountBigInt.toString();
-
-            logger.debug('[useParaswapQuote] Fetching quote with params:', {
-                fromToken: fromToken.symbol,
-                fromAddress: fromToken.address || fromToken.underlyingAsset,
-                toToken: toToken.symbol,
-                toAddress: toToken.address || toToken.underlyingAsset,
-                destAmount,
-                chainId: selectedNetwork?.chainId || DEFAULT_NETWORK.chainId
-            });
-
-            addLog?.('Finding best route on ParaSwap...', 'info');
-            addLog?.(`Quote target: ${toToken.symbol}, repay amount: ${destAmount} (exact amount)`, 'info');
-
             // Normalize addresses before sending to backend
             const fromTokenAddress = normalizeTokenAddress(fromToken.address || fromToken.underlyingAsset, fromToken.symbol);
             const toTokenAddress = normalizeTokenAddress(toToken.address || toToken.underlyingAsset, toToken.symbol);
 
-            // Include APY from frontend token data (prefer variableBorrowRate) so backend uses
-            // the authoritative frontend value instead of falling back to on-chain/defaults.
-            const apyPercentToSend = (typeof fromToken?.variableBorrowRate === 'number')
-                ? fromToken.variableBorrowRate * 100
-                : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate * 100 : null);
+            if (isCollateral) {
+                addLog?.(`Swapping collateral: ${fromToken.symbol} -> ${toToken.symbol}...`, 'info');
+                addLog?.('Updating quote...', 'info');
 
-            const routeResult = await getDebtQuote({
-                fromToken: {
-                    address: fromTokenAddress,
-                    decimals: fromToken.decimals,
-                    symbol: fromToken.symbol,
-                },
-                toToken: {
-                    address: toTokenAddress,
-                    decimals: toToken.decimals,
-                    symbol: toToken.symbol,
-                },
-                destAmount: destAmount,
-                userAddress: account,
-                apyPercent: apyPercentToSend,
-                chainId: selectedNetwork?.chainId || DEFAULT_NETWORK.chainId,
-            });
+                const srcAmount = debouncedAmount.toString();
 
-            const { priceRoute, srcAmount, version, augustus, bufferBps, feeBps, apyPercent } = routeResult;
-            const quoteTimestamp = Math.floor(Date.now() / 1000);
+                logger.debug('[useParaswapQuote] Fetching collateral quote with params:', {
+                    fromToken: fromToken.symbol,
+                    toToken: toToken.symbol,
+                    srcAmount,
+                    chainId: selectedNetwork?.chainId || DEFAULT_NETWORK.chainId
+                });
 
-            // Convert strings to BigInt
-            const srcAmountBigInt = BigInt(srcAmount);
-            const destAmountBn = BigInt(destAmount);
+                const routeResult = await getCollateralQuote({
+                    fromToken: {
+                        address: fromTokenAddress,
+                        decimals: fromToken.decimals,
+                        symbol: fromToken.symbol,
+                    },
+                    toToken: {
+                        address: toTokenAddress,
+                        decimals: toToken.decimals,
+                        symbol: toToken.symbol,
+                    },
+                    srcAmount: srcAmount,
+                    adapterAddress: adapterAddress || account, // adapter contract is required; fallback to account
+                    walletAddress: account,
+                    chainId: selectedNetwork?.chainId || DEFAULT_NETWORK.chainId,
+                });
 
-            logger.debug('[useParaswapQuote] Quote received:', {
-                srcAmount: srcAmountBigInt.toString(),
-                destAmount: destAmountBigInt.toString(),
-                srcAmountFormatted: ethers.formatUnits(srcAmountBigInt, toToken.decimals),
-                version,
-                augustus,
-                bufferBps,
-                feeBps
-            });
+                const { priceRoute, destAmount, version, augustus, bufferBps, feeBps } = routeResult;
+                const quoteTimestamp = Math.floor(Date.now() / 1000);
 
-            addLog?.(`Quote received - will need ${ethers.formatUnits(srcAmountBigInt, toToken.decimals)} ${toToken.symbol}`, 'success');
+                const srcAmountBigInt = BigInt(srcAmount);
+                const destAmountBn = BigInt(destAmount);
 
-            const quotePayload = {
-                priceRoute,
-                srcAmount: srcAmountBigInt,
-                destAmount: destAmountBn,
-                fromToken,
-                toToken,
-                timestamp: quoteTimestamp,
-                version,
-                augustus,
-                bufferBps,
-                feeBps,
-                apyPercent: typeof apyPercent === 'number' ? apyPercent : null,
-            };
+                addLog?.(`Quote received - will receive approx ${ethers.formatUnits(destAmountBn, toToken.decimals)} ${toToken.symbol}`, 'success');
 
-            setSwapQuote(quotePayload);
-            setAutoRefreshEnabled(true);
-            onQuoteLoaded?.(quotePayload);
-            return quotePayload;
+                const quotePayload = {
+                    priceRoute,
+                    srcAmount: srcAmountBigInt,
+                    destAmount: destAmountBn,
+                    fromToken,
+                    toToken,
+                    timestamp: quoteTimestamp,
+                    version,
+                    augustus,
+                    bufferBps,
+                    feeBps,
+                    apyPercent: null,
+                };
+
+                setSwapQuote(quotePayload);
+                setAutoRefreshEnabled(true);
+                onQuoteLoaded?.(quotePayload);
+                return quotePayload;
+
+            } else {
+                addLog?.(`Swapping debt: ${fromToken.symbol} -> ${toToken.symbol}...`, 'info');
+                addLog?.('Updating quote...', 'info');
+
+                // Calculate a buffer to cover APY drift while the transaction is mining
+                const apyDecimal = typeof fromToken?.variableBorrowRate === 'number'
+                    ? fromToken.variableBorrowRate
+                    : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate : 0.05); // Default 5%
+
+                let destAmountBigInt = BigInt(debouncedAmount.toString());
+                if (destAmountBigInt > 0n) {
+                    const thirtyMinSeconds = 30 * 60;
+                    const yearSeconds = 365 * 24 * 60 * 60;
+                    const rawDebt = Number(destAmountBigInt);
+                    const driftBuffer = Math.ceil(rawDebt * apyDecimal * (thirtyMinSeconds / yearSeconds));
+                    const driftBigInt = BigInt(driftBuffer) + 1n;
+                    destAmountBigInt += driftBigInt;
+                }
+                const destAmount = destAmountBigInt.toString();
+
+                addLog?.('Finding best route on ParaSwap...', 'info');
+                addLog?.(`Quote target: ${toToken.symbol}, repay amount: ${destAmount} (exact amount)`, 'info');
+
+                const apyPercentToSend = (typeof fromToken?.variableBorrowRate === 'number')
+                    ? fromToken.variableBorrowRate * 100
+                    : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate * 100 : null);
+
+                const routeResult = await getDebtQuote({
+                    fromToken: {
+                        address: fromTokenAddress,
+                        decimals: fromToken.decimals,
+                        symbol: fromToken.symbol,
+                    },
+                    toToken: {
+                        address: toTokenAddress,
+                        decimals: toToken.decimals,
+                        symbol: toToken.symbol,
+                    },
+                    destAmount: destAmount,
+                    adapterAddress: account,
+                    apyPercent: apyPercentToSend,
+                    chainId: selectedNetwork?.chainId || DEFAULT_NETWORK.chainId,
+                });
+
+                const { priceRoute, srcAmount, version, augustus, bufferBps, feeBps, apyPercent } = routeResult;
+                const quoteTimestamp = Math.floor(Date.now() / 1000);
+
+                const srcAmountBigInt = BigInt(srcAmount);
+                const destAmountBn = BigInt(destAmount);
+
+                addLog?.(`Quote received - will need ${ethers.formatUnits(srcAmountBigInt, toToken.decimals)} ${toToken.symbol}`, 'success');
+
+                const quotePayload = {
+                    priceRoute,
+                    srcAmount: srcAmountBigInt,
+                    destAmount: destAmountBn,
+                    fromToken,
+                    toToken,
+                    timestamp: quoteTimestamp,
+                    version,
+                    augustus,
+                    bufferBps,
+                    feeBps,
+                    apyPercent: typeof apyPercent === 'number' ? apyPercent : null,
+                };
+
+                setSwapQuote(quotePayload);
+                setAutoRefreshEnabled(true);
+                onQuoteLoaded?.(quotePayload);
+                return quotePayload;
+            }
         } catch (error) {
             logger.error('[useParaswapQuote] Quote error:', error);
             addLog?.('Quote error: ' + error.message, 'error');
@@ -201,7 +232,8 @@ export const useParaswapQuote = ({
             setIsQuoteLoading(false);
         }
     }, [
-        debouncedDebtAmount,
+        debouncedAmount,
+        isCollateral,
         fromToken,
         toToken,
         addLog,
@@ -213,18 +245,18 @@ export const useParaswapQuote = ({
 
     // Detect when user is typing
     useEffect(() => {
-        if (debtAmount !== debouncedDebtAmount && debtAmount > BigInt(0)) {
+        if (currentAmount !== debouncedAmount && currentAmount > BigInt(0)) {
             setIsTyping(true);
         } else {
             setIsTyping(false);
         }
-    }, [debtAmount, debouncedDebtAmount]);
+    }, [currentAmount, debouncedAmount]);
 
     // Auto-fetch quote
     useEffect(() => {
         logger.debug('[useParaswapQuote] Auto-fetch effect triggered:', {
             enabled,
-            debouncedDebtAmount: debouncedDebtAmount?.toString(),
+            debouncedAmount: debouncedAmount?.toString(),
             fromToken: fromToken?.symbol,
             fromAddress: fromToken?.underlyingAsset,
             toToken: toToken?.symbol,
@@ -237,7 +269,7 @@ export const useParaswapQuote = ({
             return;
         }
 
-        if (!debouncedDebtAmount || debouncedDebtAmount === BigInt(0) || !fromToken || !toToken) {
+        if (!debouncedAmount || debouncedAmount === BigInt(0) || !fromToken || !toToken) {
             logger.debug('[useParaswapQuote] Conditions not met, clearing quote');
             clearQuote();
             return;
@@ -245,7 +277,7 @@ export const useParaswapQuote = ({
 
         logger.debug('[useParaswapQuote] Calling fetchQuote...');
         fetchQuote();
-    }, [debouncedDebtAmount, fromToken?.underlyingAsset, toToken?.underlyingAsset, enabled, fetchQuote, clearQuote]);
+    }, [debouncedAmount, fromToken?.underlyingAsset, toToken?.underlyingAsset, enabled, fetchQuote, clearQuote]);
 
     // Refresh interval
     useEffect(() => {
