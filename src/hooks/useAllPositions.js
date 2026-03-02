@@ -1,34 +1,31 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import axios from 'axios';
+import { apiClient } from '../services/api';
 import logger from '../utils/logger';
 
 /**
  * Hook to fetch user positions across all supported networks
- * @param {string} userAddress - User's wallet address
+ * @param {string} walletAddress - User's wallet address
  * @param {Object} opts - Options: { refreshIntervalMs }
  * @returns {Object} { positionsByChain, loading, error, lastFetch, refresh }
  */
-export const useAllPositions = (userAddress, opts = {}) => {
+export const useAllPositions = (walletAddress, opts = {}) => {
     const [data, setData] = useState(null); // object keyed by chainId
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [lastFetch, setLastFetch] = useState(null);
-    const prevAddressRef = useRef(userAddress);
+    const prevAddressRef = useRef(walletAddress);
 
     const fetchPositions = useCallback(async (force = false) => {
-        if (!userAddress) return;
+        if (!walletAddress) return;
 
         setLoading(true);
         setError(null);
 
         try {
-            const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001/v1';
-            const url = `${baseURL}/position`;
+            logger.debug('Fetching all positions', { walletAddress });
 
-            logger.debug('Fetching all positions', { userAddress, url });
-
-            const response = await axios.post(url, {
-                userAddress,
+            const response = await apiClient.post('/position', {
+                walletAddress,
                 ...(force && { force: true })
             }, {
                 timeout: 30000 // 30s timeout for multi-chain request
@@ -45,14 +42,15 @@ export const useAllPositions = (userAddress, opts = {}) => {
             const errorMsg = err.response?.data?.message || err.message || 'Failed to fetch positions';
             logger.error('Error fetching all positions', { error: errorMsg });
             setError(errorMsg);
+            setData(null);
         } finally {
             setLoading(false);
         }
-    }, [userAddress]);
+    }, [walletAddress]);
 
     // Initial fetch and setup auto-refresh
     useEffect(() => {
-        if (!userAddress) {
+        if (!walletAddress) {
             setData(null);
             prevAddressRef.current = null;
             return;
@@ -60,9 +58,9 @@ export const useAllPositions = (userAddress, opts = {}) => {
 
         // Only clear previous data if the actual wallet address changed
         // This prevents network switches from triggering the loading animation
-        if (prevAddressRef.current !== userAddress) {
+        if (prevAddressRef.current !== walletAddress) {
             setData(null);
-            prevAddressRef.current = userAddress;
+            prevAddressRef.current = walletAddress;
         }
 
         fetchPositions();
@@ -74,7 +72,7 @@ export const useAllPositions = (userAddress, opts = {}) => {
         }, refreshInterval);
 
         return () => clearInterval(interval);
-    }, [fetchPositions, userAddress, opts.refreshIntervalMs]);
+    }, [fetchPositions, walletAddress, opts.refreshIntervalMs]);
 
     return {
         positionsByChain: data,

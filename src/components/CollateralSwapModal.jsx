@@ -18,9 +18,9 @@ import { Modal } from './Modal.jsx';
 import { InfoTooltip } from './InfoTooltip.jsx';
 import { useWeb3 } from '../context/web3Context.js';
 import { useParaswapQuote } from '../hooks/useParaswapQuote.js';
-import { useDebtSwitchActions } from '../hooks/useDebtSwitchActions.js';
-import { useDebtPositions } from '../hooks/useDebtPositions.js';
+import { useCollateralSwapActions } from '../hooks/useCollateralSwapActions.js';
 import { useUserPosition } from '../hooks/useUserPosition.js';
+import { useCollateralPositions } from '../hooks/useCollateralPositions.js';
 import { getUserPosition } from '../services/api.js';
 import { useToast } from '../context/ToastContext.jsx';
 import { Copy } from 'lucide-react';
@@ -140,7 +140,7 @@ const TokenSelector = ({ label, selectedToken, tokens, onSelect, disabled, getBo
                                 {selectedToken?.symbol ? (
                                     <img
                                         src={getTokenLogo(selectedToken.symbol)}
-                                        alt={selectedToken.symbol} // Fixed alt attribute closing
+                                        alt={selectedToken.symbol}
                                         className="w-6 h-6"
                                         onError={onTokenImgError(selectedToken.symbol)}
                                     />
@@ -185,8 +185,8 @@ const TokenSelector = ({ label, selectedToken, tokens, onSelect, disabled, getBo
                                     <div className="p-4 text-center text-slate-500 text-xs">No tokens found</div>
                                 )}
                                 {filteredTokens.map((token) => {
-                                    const status = getBorrowStatus ? getBorrowStatus(token) : { borrowable: true, reasons: [] };
-                                    const isRestricted = !status.borrowable;
+                                    const status = getBorrowStatus ? getBorrowStatus(token) : { swappable: true, reasons: [] };
+                                    const isRestricted = !status.swappable;
 
                                     return (
                                         <button
@@ -230,7 +230,7 @@ const TokenSelector = ({ label, selectedToken, tokens, onSelect, disabled, getBo
 
 
 // Compact Amount Input Row
-const CompactAmountInputRow = ({ token, value, onChange, maxAmount, decimals, disabled, formattedDebt, onTokenSelect, usdValue }) => {
+const CompactAmountInputRow = ({ token, value, onChange, maxAmount, decimals, disabled, formattedSupply, onTokenSelect, usdValue }) => {
     const [pctPopoverOpen, setPctPopoverOpen] = useState(false);
     const pctBtnRef = useRef(null);
     const pctPopoverRef = useRef(null);
@@ -325,7 +325,7 @@ const CompactAmountInputRow = ({ token, value, onChange, maxAmount, decimals, di
 
                 {/* Balance + % popover + MAX */}
                 <div className="flex items-center gap-2 text-xs text-slate-400 relative">
-                    <span className="text-slate-500">Balance {compactNumber(formattedDebt) || '0'}</span>
+                    <span className="text-slate-500">Balance {compactNumber(formattedSupply) || '0'}</span>
 
                     {/* % button + popover */}
                     <div className="relative">
@@ -372,33 +372,40 @@ const CompactAmountInputRow = ({ token, value, onChange, maxAmount, decimals, di
 
 
 /**
- * DebtSwapModal Component
- * Complete modal for swapping debt with integrated hooks and state management
+ * CollateralSwapModal Component
+ * Complete modal for swapping collateral with integrated hooks and state management
  */
-export const DebtSwapModal = ({
+export const CollateralSwapModal = ({
     isOpen,
     onClose,
     initialFromToken = null,
     initialToToken = null,
     chainId = null,
     marketAssets: providedMarketAssets = null,
-    providedBorrows = null,
+    providedSupplies = null,
 }) => {
     const { account, provider, selectedNetwork, networkRpcProvider } = useWeb3();
     const { addToast } = useToast();
 
     // Use provided marketAssets as fallback if selectedNetwork isn't synced yet
     // In normal flow, selectedNetwork will be updated by Web3Provider's chainChanged handler
-    const { marketAssets: fetchedMarketAssets, borrows, loading: positionsLoading, refresh: refreshPositions } = useUserPosition();
+    const { marketAssets: fetchedMarketAssets, supplies, loading: positionsLoading, refresh: refreshPositions } = useUserPosition();
     const marketAssets = providedMarketAssets || fetchedMarketAssets;
 
-    // Fallback: sometimes the hook instance for this modal doesn't yet have `borrows` cached
-    const [fallbackBorrows, setFallbackBorrows] = useState(null);
+    // Fallback: sometimes the hook instance for this modal doesn't yet have `supplies` cached
+    const [fallbackSupplies, setFallbackSupplies] = useState(null);
     const [fallbackLoading, setFallbackLoading] = useState(false);
 
     // For hooks, use selectedNetwork (should be updated by Web3Provider)
     // chainId prop is kept for debug/fallback purposes
     const effectiveNetwork = selectedNetwork;
+
+    // Adapter address for the collateral swap contract — required by the quote and build endpoints
+    const adapterAddress = useMemo(() => {
+        const addr = effectiveNetwork?.addresses?.SWAP_COLLATERAL_ADAPTER;
+        if (!addr) return null;
+        try { return ethers.getAddress(addr); } catch { return null; }
+    }, [effectiveNetwork?.addresses?.SWAP_COLLATERAL_ADAPTER]);
 
     // Local state
     const [fromToken, setFromToken] = useState(initialFromToken);
@@ -423,7 +430,7 @@ export const DebtSwapModal = ({
     const [tokenModalSearch, setTokenModalSearch] = useState('');
 
     const addLog = useCallback((message, type = 'info') => {
-        logger.debug(`[DebtSwapModal] ${type}: ${message}`);
+        logger.debug(`[CollateralSwapModal] ${type}: ${message}`);
     }, []);
 
     const copyToClipboard = useCallback((text) => {
@@ -435,23 +442,23 @@ export const DebtSwapModal = ({
     // Stable token-selector openers
     const openTokenSelectorForFrom = useCallback(() => {
 
-        // Only refresh if parent did NOT provide borrows (avoid duplicate fetch when modal opened from PositionsAccordion)
-        const hasProvidedBorrows = providedBorrows && providedBorrows.length > 0;
+        // Only refresh if parent did NOT provide supplies (avoid duplicate fetch when modal opened from PositionsAccordion)
+        const hasProvidedSupplies = providedSupplies && providedSupplies.length > 0;
 
-        // If no provided borrows and no cached borrows in hook, refresh shared hook
-        if (!hasProvidedBorrows && (!borrows || borrows.length === 0) && !positionsLoading && typeof refreshPositions === 'function') {
-            refreshPositions(true).catch((e) => logger.warn('[DebtSwapModal] refreshPositions failed', e));
+        // If no provided supplies and no cached supplies in hook, refresh shared hook
+        if (!hasProvidedSupplies && (!supplies || supplies.length === 0) && !positionsLoading && typeof refreshPositions === 'function') {
+            refreshPositions(true).catch((e) => logger.warn('[CollateralSwapModal] refreshPositions failed', e));
         }
 
-        // If still empty after a short delay and parent didn't provide borrows, fetch directly from backend as a fallback
-        if (!hasProvidedBorrows && (!borrows || borrows.length === 0) && (!fallbackBorrows || fallbackBorrows.length === 0)) {
+        // If still empty after a short delay and parent didn't provide supplies, fetch directly from backend as a fallback
+        if (!hasProvidedSupplies && (!supplies || supplies.length === 0) && (!fallbackSupplies || fallbackSupplies.length === 0)) {
             if (account && selectedNetwork?.chainId) {
                 setFallbackLoading(true);
                 getUserPosition(account, selectedNetwork.chainId)
                     .then((pos) => {
-                        setFallbackBorrows(pos?.borrows || []);
+                        setFallbackSupplies(pos?.supplies || []);
                     })
-                    .catch((err) => logger.warn('[DebtSwapModal] fallback fetch failed', err))
+                    .catch((err) => logger.warn('[CollateralSwapModal] fallback fetch failed', err))
                     .finally(() => setFallbackLoading(false));
             }
         }
@@ -459,7 +466,7 @@ export const DebtSwapModal = ({
         setSelectingForFrom(true);
         setTokenModalSearch('');
         setTokenSelectorOpen(true);
-    }, [borrows, positionsLoading, marketAssets, refreshPositions, account, selectedNetwork, fallbackBorrows, setTokenModalSearch]);
+    }, [supplies, positionsLoading, marketAssets, refreshPositions, account, selectedNetwork, fallbackSupplies, setTokenModalSearch, providedSupplies]);
 
     const openTokenSelectorForTo = useCallback(() => {
         setSelectingForFrom(false);
@@ -511,7 +518,7 @@ export const DebtSwapModal = ({
     const prevAccountRef = useRef(account);
     useEffect(() => {
         if (isOpen && account && prevAccountRef.current && prevAccountRef.current !== account) {
-            logger.debug('[DebtSwapModal] Wallet address changed while open. Closing modal to prevent desync.');
+            logger.debug('[CollateralSwapModal] Wallet address changed while open. Closing modal to prevent desync.');
             onClose();
         }
         prevAccountRef.current = account;
@@ -533,12 +540,12 @@ export const DebtSwapModal = ({
 
     // Debt positions hook
     const {
-        debtBalance,
-        formattedDebt,
+        supplyBalance,
+        formattedSupply,
         allowance,
-        isDebtLoading,
-        fetchDebtData,
-    } = useDebtPositions({
+        isPositionLoading: isDebtLoading,
+        fetchPositionData: fetchDebtData,
+    } = useCollateralPositions({
         account,
         provider,
         networkRpcProvider,
@@ -562,13 +569,15 @@ export const DebtSwapModal = ({
         clearQuote,
         resetRefreshCountdown,
     } = useParaswapQuote({
-        debtAmount: swapAmount,
+        sellAmount: swapAmount,
+        isCollateral: true,
         fromToken,
         toToken,
         addLog,
         onQuoteLoaded: null,
         selectedNetwork: effectiveNetwork,
         account,
+        adapterAddress,
         enabled: isOpen,
         freezeQuote,
     });
@@ -576,7 +585,7 @@ export const DebtSwapModal = ({
     // When the user changes the source token: clear the input amount and quote.
     // The destination token is preserved UNLESS it's the same asset as the new fromToken
     // (which would be an invalid self-swap) — in that case auto-select the first available
-    // borrowable token instead.
+    // swappable token instead.
     // We use a ref to track the previous address so this only runs when the token
     // *actually* changes — not when function references like clearQuote/fetchDebtData
     // get new identities on re-render (which would reset toToken spuriously).
@@ -596,7 +605,7 @@ export const DebtSwapModal = ({
         const currentToAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
         if (currentToAddr && newAddr && currentToAddr === newAddr) {
             prevToTokenAddrRef.current = ''; // reset ref so toToken effect fires on next selection
-            // Auto-select the first borrowable token that isn't the new fromToken
+            // Auto-select the first swappable token that isn't the new fromToken
             const fallback = (marketAssets || []).find((t) => {
                 const tAddr = (t.underlyingAsset || t.address || '').toLowerCase();
                 return tAddr && tAddr !== newAddr && t.isActive && !t.isFrozen && !t.isPaused && t.borrowingEnabled;
@@ -606,7 +615,7 @@ export const DebtSwapModal = ({
 
         // Refresh on-chain debt data for the new fromToken so the MAX button is up-to-date.
         if (typeof fetchDebtData === 'function') {
-            fetchDebtData().catch((e) => logger.warn('[DebtSwapModal] fetchDebtData failed on fromToken change', e));
+            fetchDebtData().catch((e) => logger.warn('[CollateralSwapModal] fetchDebtData failed on fromToken change', e));
         }
     }, [fromToken, isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -636,17 +645,19 @@ export const DebtSwapModal = ({
         clearTxError,
         clearUserRejected,
         clearCachedPermit,
-    } = useDebtSwitchActions({
+    } = useCollateralSwapActions({
         account,
         provider,
         networkRpcProvider,
         fromToken,
         toToken,
         allowance,
+        swapAmount,
+        supplyBalance,
         swapQuote,
         slippage,
         addLog,
-        fetchDebtData,
+        fetchPositionData: fetchDebtData,
         fetchQuote,
         resetRefreshCountdown,
         clearQuote,
@@ -674,7 +685,7 @@ export const DebtSwapModal = ({
 
 
     // Destructure clearUserRejected from actions (added in hook)
-    // (Note: clearUserRejected is returned by useDebtSwitchActions)
+    // (Note: clearUserRejected is returned by useCollateralSwapActions)
     // eslint-disable-next-line no-unused-vars
     const { } = {};
 
@@ -698,11 +709,11 @@ export const DebtSwapModal = ({
             const maxNewDebt = calcApprovalAmount(srcAmountBigInt, bufferBps);
             return allowance < maxNewDebt;
         } catch (error) {
-            logger.warn('[DebtSwapModal] Failed to compute needsApproval from quote:', error);
+            logger.warn('[CollateralSwapModal] Failed to compute needsApproval from quote:', error);
             return false;
         }
     }, [allowance, toToken, swapQuote]);
-    const isBusy = isActionLoading || isDebtLoading;
+    const isBusy = isActionLoading;
     const displayBufferBps = swapQuote?.bufferBps ?? 13;
     const displayBufferPct = (displayBufferBps / 100).toFixed(2);
     const isDev = import.meta.env?.MODE === 'development';
@@ -711,15 +722,15 @@ export const DebtSwapModal = ({
         if (fromToken && toToken) return `Swap ${fromToken.symbol} → ${toToken.symbol}`;
         if (fromToken) return `Swap ${fromToken.symbol} debt`;
         if (toToken) return `Swap to ${toToken.symbol}`;
-        return 'Swap debt';
+        return 'Swap collateral';
     }, [fromToken, toToken]);
 
 
 
-    // Initialize input value when debtBalance is loaded
+    // Initialize input value when supplyBalance is loaded
     useEffect(() => {
         // Removed automatic loading of debt balance - user must input manually
-    }, [debtBalance, fromToken, inputValue]);
+    }, [supplyBalance, fromToken, inputValue]);
 
     // Handle input change
     const handleInputChange = useCallback((value) => {
@@ -729,7 +740,7 @@ export const DebtSwapModal = ({
                 setSwapAmount(BigInt(0));
             } else {
                 const parsed = ethers.parseUnits(value, fromToken?.decimals || 18);
-                const maxAmt = debtBalance || BigInt(0);
+                const maxAmt = supplyBalance || BigInt(0);
                 const finalAmount = parsed > maxAmt ? maxAmt : parsed;
 
                 setSwapAmount(finalAmount);
@@ -737,11 +748,11 @@ export const DebtSwapModal = ({
         } catch (error) {
             logger.warn('Invalid input:', value, error);
         }
-    }, [fromToken?.decimals, debtBalance]);
+    }, [fromToken?.decimals, supplyBalance]);
 
     // Get borrow status for token
     const getBorrowStatus = useCallback((token) => {
-        if (!token) return { borrowable: false, reasons: [] };
+        if (!token) return { swappable: false, reasons: [] };
 
         let notBorrowable = false;
         const reasons = [];
@@ -752,10 +763,10 @@ export const DebtSwapModal = ({
         if (!token.borrowingEnabled) { reasons.push('Borrowing Disabled'); notBorrowable = true; }
 
         try {
-            // Aave V3 borrowCap is typically in whole tokens. totalDebt is also in whole tokens from formattedReserves.
-            if (token.borrowCap && token.borrowCap !== "0" && token.totalDebt) {
-                const cap = parseFloat(token.borrowCap);
-                const debt = parseFloat(token.totalDebt);
+            // Aave V3 supplyCap is typically in whole tokens. totalLiquidity is also in whole tokens from formattedReserves.
+            if (token.supplyCap && token.supplyCap !== "0" && token.totalLiquidity) {
+                const cap = parseFloat(token.supplyCap);
+                const debt = parseFloat(token.totalLiquidity);
 
                 // If debt is 99.5% of cap or greater, prevent borrowing
                 if (cap > 0 && debt >= cap * 0.995) {
@@ -776,7 +787,7 @@ export const DebtSwapModal = ({
             logger.warn('Failed to parse liquidity or borrow cap for', token.symbol, error);
         }
 
-        return { borrowable: !notBorrowable, reasons };
+        return { swappable: !notBorrowable, reasons };
     }, []);
 
     // Clear transaction errors when key data changes so old errors don't persist
@@ -849,23 +860,23 @@ export const DebtSwapModal = ({
     }, [showSlippageSettings]);
 
     // Filter tokens
-    const borrowableAssets = useMemo(() => {
+    const swappableAssets = useMemo(() => {
         if (!marketAssets) return [];
         return marketAssets.filter(asset => {
             const status = getBorrowStatus(asset);
-            return status.borrowable;
+            return status.swappable;
         });
     }, [marketAssets, getBorrowStatus]);
 
-    // Build a detailed list for borrowed tokens by merging borrow entries with market asset metadata
+    // Build a detailed list for supplied tokens by merging supply entries with market asset metadata
     const activeDebtAssets = useMemo(() => {
-        // prefer borrows provided by parent (PositionsAccordion) so modal can show positions immediately
-        const sourceBorrows = (providedBorrows && providedBorrows.length > 0)
-            ? providedBorrows
-            : (borrows && borrows.length > 0) ? borrows : (fallbackBorrows || []);
-        if (!sourceBorrows || sourceBorrows.length === 0) return [];
+        // prefer supplies provided by parent (PositionsAccordion) so modal can show positions immediately
+        const sourceSupplies = (providedSupplies && providedSupplies.length > 0)
+            ? providedSupplies
+            : (supplies && supplies.length > 0) ? supplies : (fallbackSupplies || []);
+        if (!sourceSupplies || sourceSupplies.length === 0) return [];
         const chainMarket = marketAssets || [];
-        return sourceBorrows
+        return sourceSupplies
             .filter(b => b.amount && BigInt(b.amount) > BigInt(0))
             .map((b) => {
                 const match = chainMarket.find(m => m.underlyingAsset?.toLowerCase() === b.underlyingAsset?.toLowerCase());
@@ -886,7 +897,7 @@ export const DebtSwapModal = ({
                     borrowRate: b.borrowRate,
                 };
             });
-    }, [providedBorrows, borrows, marketAssets, fallbackBorrows]);
+    }, [providedSupplies, supplies, marketAssets, fallbackSupplies]);
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={modalTitle} maxWidth="520px" headerBorder={false}>
@@ -1013,10 +1024,10 @@ export const DebtSwapModal = ({
                             token={fromToken}
                             value={inputValue}
                             onChange={handleInputChange}
-                            maxAmount={debtBalance || BigInt(0)}
+                            maxAmount={supplyBalance || BigInt(0)}
                             decimals={fromToken.decimals}
                             disabled={isBusy}
-                            formattedDebt={formattedDebt}
+                            formattedSupply={formattedSupply}
                             onTokenSelect={openTokenSelectorForFrom}
                             usdValue={(() => {
                                 const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
@@ -1083,7 +1094,7 @@ export const DebtSwapModal = ({
                                         {(() => {
                                             try {
                                                 // Show full precision (no rounding) using ethers.formatUnits
-                                                return ethers.formatUnits(swapQuote.srcAmount, toToken.decimals);
+                                                return ethers.formatUnits(swapQuote.destAmount, toToken.decimals);
                                             } catch (e) {
                                                 return '...';
                                             }
@@ -1138,7 +1149,7 @@ export const DebtSwapModal = ({
                                         (m.underlyingAsset || m.address || '').toLowerCase() === toAddr
                                     );
                                     const price = parseFloat(marketToken?.priceInUSD ?? toToken?.priceInUSD);
-                                    const amount = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals));
+                                    const amount = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals));
                                     if (!isNaN(price) && price > 0 && !isNaN(amount) && amount > 0) {
                                         return <span className="text-xs text-slate-500 block min-h-4">{formatUSD(amount * price)}</span>;
                                     }
@@ -1149,7 +1160,7 @@ export const DebtSwapModal = ({
                             <span className="text-xs text-slate-500 block min-h-4"></span>
                         )}
 
-                        {/* Right side placeholder logic placeholder for available borrows */}
+                        {/* Right side placeholder logic placeholder for available supplies */}
                         <div className="flex items-center gap-2 text-xs text-slate-400">
                             {/* Future: Available to borrow xxx.xx */}
                         </div>
@@ -1172,7 +1183,7 @@ export const DebtSwapModal = ({
                                     if (swapQuote && swapQuote.srcAmount && swapAmount && swapAmount > BigInt(0)) {
                                         try {
                                             const inputF = parseFloat(ethers.formatUnits(swapAmount, fromToken.decimals));
-                                            const outputF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals));
+                                            const outputF = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals));
                                             if (inputF > 0 && outputF > 0) {
                                                 if (invertRate) {
                                                     return (inputF / outputF).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + fromToken.symbol;
@@ -1302,7 +1313,7 @@ export const DebtSwapModal = ({
                                 {selectingForFrom && positionsLoading && activeDebtAssets.length === 0 ? (
                                     <div className="p-4 text-center text-slate-500 text-xs">Loading tokens...</div>
                                 ) : (() => {
-                                    let baseList = selectingForFrom ? activeDebtAssets : (borrowableAssets || []);
+                                    let baseList = selectingForFrom ? activeDebtAssets : (swappableAssets || []);
 
                                     // When selecting the `to` token, exclude the currently-selected `fromToken`
                                     // to prevent choosing the same asset as both source and destination.
@@ -1336,8 +1347,8 @@ export const DebtSwapModal = ({
                                     }
 
                                     return list.map((token) => {
-                                        const status = getBorrowStatus ? getBorrowStatus(token) : { borrowable: true };
-                                        const disabled = !status.borrowable;
+                                        const status = getBorrowStatus ? getBorrowStatus(token) : { swappable: true };
+                                        const disabled = !status.swappable;
                                         return (
                                             <button
                                                 key={token.underlyingAsset || token.address}
@@ -1379,7 +1390,7 @@ export const DebtSwapModal = ({
                 {/* Action Button */}
                 <button
                     onClick={handleSwap}
-                    disabled={isBusy || !swapQuote || !fromToken || !toToken || swapAmount === BigInt(0)}
+                    disabled={isBusy || !swapQuote || !fromToken || !toToken || (swapQuote.srcAmount && BigInt(swapQuote.srcAmount) <= 0n)}
                     className="w-full bg-primary hover:bg-primary-hover text-white font-bold py-3 px-4 rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-primary/20"
                 >
                     {isActionLoading ? (

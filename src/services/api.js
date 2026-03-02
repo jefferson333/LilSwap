@@ -1,10 +1,10 @@
 import axios from 'axios';
 import logger from '../utils/logger';
-import { notifyApiVersion } from '../context/ApiMetaContext.jsx';
+import { notifyApiVersion, notifyApiStatus } from '../context/ApiMetaContext.jsx';
 
 // Axios instance configured for the backend
 // Uses VITE_API_URL from environment files (.env.development or .env.production)
-const apiClient = axios.create({
+export const apiClient = axios.create({
     baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/v1',
     headers: {
         'Content-Type': 'application/json',
@@ -30,6 +30,7 @@ apiClient.interceptors.response.use(
         // Passively capture the API version from any successful response
         const v = response.headers?.['x-api-version'];
         if (v) notifyApiVersion(v);
+        notifyApiStatus(true);
         return response;
     },
     async (error) => {
@@ -68,6 +69,11 @@ apiClient.interceptors.response.use(
             message: error.message
         });
 
+        // If it's a network error or 5xx error, mark API as down
+        if (!error.response || error.response.status >= 500 || error.code === 'ECONNABORTED') {
+            notifyApiStatus(false);
+        }
+
         return Promise.reject(error);
     }
 );
@@ -79,6 +85,7 @@ apiClient.interceptors.response.use(
  * @param {Object} params.toToken - Destination token (new debt): { address, decimals, symbol }
  * @param {string} params.destAmount - Destination amount in string (wei)
  * @param {string} params.userAddress - Adapter address
+ * @param {string} params.walletAddress - Actual user wallet address
  * @param {number} params.chainId - Chain ID
  * @returns {Promise<Object>} Quote data (priceRoute, srcAmount, version, augustus)
  */
@@ -103,6 +110,7 @@ export const getDebtQuote = async (params) => {
  * @param {Object} params.fromToken - Source token data (address, decimals, symbol)
  * @param {Object} params.toToken - Destination token data (address, decimals, symbol)
  * @param {string} params.userAddress - Adapter address
+ * @param {string} params.walletAddress - Actual user wallet address
  * @param {number} params.slippageBps - Slippage in basis points (e.g., 100 = 1%)
  * @param {number} params.chainId - Chain ID
  * @returns {Promise<Object>} Transaction data (to, data, value, gasLimit)
@@ -121,21 +129,25 @@ export const buildDebtSwapTx = async (params) => {
 
 /**
  * Fetch aggregated user positions (supplies and borrows) from Aave
- * @param {string} userAddress - User wallet address
+ * @param {string} walletAddress - User wallet address
  * @param {number} chainId - Chain ID
  * @returns {Promise<Object>} Aggregated position data
  */
-export const getUserPosition = async (userAddress, chainId) => {
+export const getUserPosition = async (walletAddress, chainId) => {
     try {
         const response = await apiClient.post('/position', {
-            userAddress,
+            walletAddress,
             chainId
         });
+
+        // The backend now wraps even single-chain queries with the chainId key for consistency
+        const positionData = response.data[chainId] || response.data;
+
         logger.debug('User position fetched', {
-            supplies: response.data.supplies?.length || 0,
-            borrows: response.data.borrows?.length || 0
+            supplies: positionData.supplies?.length || 0,
+            borrows: positionData.borrows?.length || 0
         });
-        return response.data;
+        return positionData;
     } catch (error) {
         const errorMessage = error.response?.data?.error || error.message || 'Error fetching position';
         logger.error('Failed to fetch user position', { error: errorMessage });
@@ -143,8 +155,59 @@ export const getUserPosition = async (userAddress, chainId) => {
     }
 };
 
+/**
+ * Get quote for Collateral Swap (ExactIn)
+ * @param {Object} params - Quote parameters
+ * @param {Object} params.fromToken - Source token (current collateral): { address, decimals, symbol }
+ * @param {Object} params.toToken - Destination token (new collateral): { address, decimals, symbol }
+ * @param {string} params.srcAmount - Source amount in string (wei)
+ * @param {string} params.userAddress - Adapter address
+ * @param {string} params.walletAddress - Actual user wallet address
+ * @param {number} params.chainId - Chain ID
+ * @returns {Promise<Object>} Quote data (priceRoute, destAmount, version, augustus)
+ */
+export const getCollateralQuote = async (params) => {
+    try {
+        const response = await apiClient.post('/quote/collateral', params);
+        logger.debug('Collateral quote received', { destAmount: response.data.destAmount });
+        return response.data;
+    } catch (error) {
+        const errorMessage = error.response?.data?.error || error.message || 'Error fetching collateral quote';
+        logger.error('Failed to get collateral quote', { error: errorMessage });
+        throw new Error(errorMessage);
+    }
+};
+
+/**
+ * Build Collateral Swap transaction via ParaSwap
+ * @param {Object} params - Transaction parameters
+ * @param {Object} params.priceRoute - ParaSwap route obtained from the quote
+ * @param {string} params.srcAmount - Source amount in string (wei)
+ * @param {boolean} params.isMaxSwap - Whether it's a full balance swap (requires offset)
+ * @param {Object} params.fromToken - Source token data (address, decimals, symbol)
+ * @param {Object} params.toToken - Destination token data (address, decimals, symbol)
+ * @param {string} params.userAddress - Adapter address
+ * @param {string} params.walletAddress - User's wallet address
+ * @param {number} params.slippageBps - Slippage in basis points (e.g., 50 = 0.5%)
+ * @param {number} params.chainId - Chain ID
+ * @returns {Promise<Object>} Transaction data
+ */
+export const buildCollateralSwapTx = async (params) => {
+    try {
+        const response = await apiClient.post('/build/collateral/paraswap', params);
+        logger.debug('Collateral swap transaction built', { augustus: response.data.augustus });
+        return response.data;
+    } catch (error) {
+        const errorMessage = error.response?.data?.error || error.message || 'Error building collateral transaction';
+        logger.error('Failed to build collateral swap transaction', { error: errorMessage });
+        throw new Error(errorMessage);
+    }
+};
+
 export default {
     getDebtQuote,
     buildDebtSwapTx,
+    getCollateralQuote,
+    buildCollateralSwapTx,
     getUserPosition,
 };

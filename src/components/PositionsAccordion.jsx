@@ -8,9 +8,9 @@ import { InfoTooltip } from './InfoTooltip';
 import { getTokenLogo, onTokenImgError } from '../utils/getTokenLogo';
 
 
-// Lazy load DebtSwapModal
+// Lazy load Swap Modals
 const DebtSwapModal = lazy(() => import('./DebtSwapModal.jsx').then(module => ({ default: module.DebtSwapModal })));
-
+const CollateralSwapModal = lazy(() => import('./CollateralSwapModal.jsx').then(module => ({ default: module.CollateralSwapModal })));
 
 
 // Formatting helpers
@@ -35,24 +35,24 @@ const formatTokenAmount = (amount, symbol) => {
 /**
  * PositionsAccordion Component
  * Displays user positions across multiple networks in an accordion layout
- * @param {string} userAddress - User wallet address
+ * @param {string} walletAddress - User wallet address
  */
-export const PositionsAccordion = ({ userAddress }) => {
-    const { positionsByChain, loading, error, lastFetch, refresh } = useAllPositions(userAddress);
+export const PositionsAccordion = ({ walletAddress }) => {
+    const { positionsByChain, loading, error, lastFetch, refresh } = useAllPositions(walletAddress);
     const [openChain, setOpenChain] = useState(null);
     const [modalState, setModalState] = useState({
         open: false,
         chainId: null,
         initialFromToken: null,
         marketAssets: [],
-        borrows: []
+        borrows: [],
+        supplies: [],
+        isCollateral: false
     });
-    const [switchingChain, setSwitchingChain] = useState(null);
 
     // Handle opening swap modal and switching chain
-    const handleOpenSwap = async (chainId, asset, marketAssets, borrows = []) => {
-        logger.debug('Opening swap modal', { chainId, asset: asset.symbol });
-        setSwitchingChain(chainId);
+    const handleOpenSwap = async (chainId, asset, marketAssets, borrows = [], supplies = [], isCollateral = false) => {
+        logger.debug('Opening swap modal', { chainId, asset: asset.symbol, isCollateral });
 
         try {
             // Request wallet to switch to the correct chain
@@ -66,7 +66,9 @@ export const PositionsAccordion = ({ userAddress }) => {
                 chainId,
                 initialFromToken: asset,
                 marketAssets: marketAssets || [],
-                borrows: borrows || []
+                borrows: borrows || [],
+                supplies: supplies || [],
+                isCollateral
             });
         } catch (err) {
             logger.error('Failed to switch chain', { chainId, error: err.message });
@@ -78,8 +80,6 @@ export const PositionsAccordion = ({ userAddress }) => {
                 `Please switch your wallet to ${networkName} and try again.\n\n` +
                 `Error: ${err.message || err}`
             );
-        } finally {
-            setSwitchingChain(null);
         }
     };
 
@@ -89,7 +89,9 @@ export const PositionsAccordion = ({ userAddress }) => {
             chainId: null,
             initialFromToken: null,
             marketAssets: [],
-            borrows: []
+            borrows: [],
+            supplies: [],
+            isCollateral: false
         });
     };
 
@@ -178,7 +180,7 @@ export const PositionsAccordion = ({ userAddress }) => {
     }
 
     // Show error state
-    if (error && !positionsByChain) {
+    if (error) {
         return (
             <div className="w-full bg-red-50 dark:bg-red-900/20 rounded-2xl border border-red-200 dark:border-red-700 p-6 text-center">
                 <AlertCircle className="w-8 h-8 text-red-500 mx-auto mb-2" />
@@ -373,14 +375,16 @@ export const PositionsAccordion = ({ userAddress }) => {
                                                     </div>
                                                 </div>
                                             </div>
-                                            <InfoTooltip message="Collateral swap will be available soon">
-                                                <button
-                                                    disabled
-                                                    className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-700/50 text-slate-400 font-medium text-base flex items-center gap-2 cursor-not-allowed shrink-0"
-                                                >
-                                                    Soon
-                                                </button>
-                                            </InfoTooltip>
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleOpenSwap(chain.chainId, supply, chain.marketAssets, [], chain.supplies, true);
+                                                }}
+                                                className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white flex items-center gap-2 transition-colors shrink-0"
+                                            >
+                                                <ArrowRightLeft className="w-4 h-4" />
+                                                <span className="text-base font-semibold inline">Swap</span>
+                                            </button>
                                         </div>
                                     ))}
                                 </div>
@@ -421,22 +425,12 @@ export const PositionsAccordion = ({ userAddress }) => {
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        handleOpenSwap(chain.chainId, borrow, chain.marketAssets, chain.borrows);
+                                                        handleOpenSwap(chain.chainId, borrow, chain.marketAssets, chain.borrows, [], false);
                                                     }}
-                                                    disabled={switchingChain === chain.chainId}
-                                                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white flex items-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                                                    className="px-4 py-2 rounded-lg bg-primary hover:bg-primary-hover text-white flex items-center gap-2 transition-colors shrink-0"
                                                 >
-                                                    {switchingChain === chain.chainId ? (
-                                                        <>
-                                                            <RefreshCw className="w-4 h-4 animate-spin" />
-                                                            <span className="text-base font-semibold inline">Switching...</span>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <ArrowRightLeft className="w-4 h-4" />
-                                                            <span className="text-base font-semibold inline">Swap</span>
-                                                        </>
-                                                    )}
+                                                    <ArrowRightLeft className="w-4 h-4" />
+                                                    <span className="text-base font-semibold inline">Swap</span>
                                                 </button>
                                             </div>
                                         ))
@@ -458,16 +452,27 @@ export const PositionsAccordion = ({ userAddress }) => {
                 </div>
             ))}
 
-            {/* Debt Swap Modal */}
+            {/* Swap Modals */}
             <Suspense fallback={<div>Loading...</div>}>
-                <DebtSwapModal
-                    isOpen={modalState.open}
-                    onClose={handleCloseModal}
-                    initialFromToken={modalState.initialFromToken}
-                    chainId={modalState.chainId}
-                    marketAssets={modalState.marketAssets}
-                    providedBorrows={modalState.borrows}
-                />
+                {modalState.isCollateral ? (
+                    <CollateralSwapModal
+                        isOpen={modalState.open}
+                        onClose={handleCloseModal}
+                        initialFromToken={modalState.initialFromToken}
+                        chainId={modalState.chainId}
+                        marketAssets={modalState.marketAssets}
+                        providedSupplies={modalState.supplies}
+                    />
+                ) : (
+                    <DebtSwapModal
+                        isOpen={modalState.open}
+                        onClose={handleCloseModal}
+                        initialFromToken={modalState.initialFromToken}
+                        chainId={modalState.chainId}
+                        marketAssets={modalState.marketAssets}
+                        providedBorrows={modalState.borrows}
+                    />
+                )}
             </Suspense>
         </div>
     );
