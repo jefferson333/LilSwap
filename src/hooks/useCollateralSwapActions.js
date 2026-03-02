@@ -102,10 +102,34 @@ export const useCollateralSwapActions = ({
         }
     }, [provider, chainId, targetHexChainId, targetNetwork.label, addLog]);
 
+    // Guard against EVM precompile addresses (0x1–0x0a) and zero address being
+    // used as aToken addresses (can happen when server returns stale/cross-chain data).
+    const isValidATokenAddress = (addr) => {
+        if (!addr || addr === ethers.ZeroAddress) return false;
+        try {
+            const val = BigInt(addr);
+            return val > BigInt(0xff); // precompiles live at 0x01–0xff range
+        } catch (_) {
+            return false;
+        }
+    };
+
     const generateAndCachePermit = useCallback(async (aTokenAddr, signer, exactAmount) => {
         try {
             const aTokenContract = new ethers.Contract(aTokenAddr, ABIS.DEBT_TOKEN, signer); // EIP712 standard same as debt
-            const nonce = await aTokenContract.nonces(account);
+            let nonce;
+            try {
+                nonce = await aTokenContract.nonces(account);
+            } catch (err) {
+                // BAD_DATA / CALL_EXCEPTION means this aToken does not implement EIP-2612 permit.
+                // Signal the caller to fall back to on-chain approve.
+                if (err?.code === 'BAD_DATA' || err?.code === 'CALL_EXCEPTION') {
+                    const noPermitErr = new Error('Token does not support EIP-2612 permit; use on-chain approve');
+                    noPermitErr.code = 'NO_PERMIT';
+                    throw noPermitErr;
+                }
+                throw err;
+            }
             const name = await aTokenContract.name();
             const deadline = Math.floor(Date.now() / 1000) + 3600;
             // Use exact amount instead of MaxUint256 for better security and UX
@@ -134,7 +158,9 @@ export const useCollateralSwapActions = ({
             addLog?.('Signature received and cached', 'success');
             return permitParams;
         } catch (err) {
-            addLog?.('Signature failed: ' + (err?.message || err), 'error');
+            if (err?.code !== 'NO_PERMIT') {
+                addLog?.('Signature failed: ' + (err?.message || err), 'error');
+            }
             throw err;
         }
     }, [account, adapterAddress, addLog, chainId]);
@@ -154,11 +180,13 @@ export const useCollateralSwapActions = ({
 
             // fromToken is expected to have aTokenAddress populated
             let aTokenAddress = fromToken.aTokenAddress;
-            if (!aTokenAddress || aTokenAddress === ethers.ZeroAddress) {
-                const poolContract = new ethers.Contract(networkAddresses.POOL, ABIS.POOL, signer);
+            if (!isValidATokenAddress(aTokenAddress)) {
+                logger.debug('[handleApprove] aTokenAddress invalid/precompile, fetching from DATA_PROVIDER:', aTokenAddress);
+                // Use DATA_PROVIDER.getReserveTokensAddresses — simpler than POOL.getReserveData, immune to struct changes
+                const dataProvider = new ethers.Contract(networkAddresses.DATA_PROVIDER, ABIS.DATA_PROVIDER, networkRpcProvider || signer);
                 const underlyingAsset = fromToken.address || fromToken.underlyingAsset;
-                const reserveData = await poolContract.getReserveData(underlyingAsset);
-                aTokenAddress = reserveData.aTokenAddress;
+                const tokenAddresses = await dataProvider.getReserveTokensAddresses(underlyingAsset);
+                aTokenAddress = tokenAddresses.aTokenAddress;
             }
 
             if (preferPermitFinal) {
@@ -227,10 +255,12 @@ export const useCollateralSwapActions = ({
             let permitParams = { amount: 0, deadline: 0, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
 
             let aTokenAddr = fromToken.aTokenAddress;
-            if (!aTokenAddr || aTokenAddr === ethers.ZeroAddress) {
-                const poolContract = new ethers.Contract(networkAddresses.POOL, ABIS.POOL, signer);
-                const reserveData = await poolContract.getReserveData(fromToken.address || fromToken.underlyingAsset);
-                aTokenAddr = reserveData.aTokenAddress;
+            if (!isValidATokenAddress(aTokenAddr)) {
+                logger.debug('[handleSwap] aTokenAddr invalid/precompile, fetching from DATA_PROVIDER:', aTokenAddr);
+                // Use DATA_PROVIDER.getReserveTokensAddresses — simpler than POOL.getReserveData, immune to struct changes
+                const dataProvider = new ethers.Contract(networkAddresses.DATA_PROVIDER, ABIS.DATA_PROVIDER, networkRpcProvider || signer);
+                const tokenAddresses = await dataProvider.getReserveTokensAddresses(fromToken.address || fromToken.underlyingAsset);
+                aTokenAddr = tokenAddresses.aTokenAddress;
             }
 
             if (signedPermit && signedPermit.token !== aTokenAddr) {
@@ -249,13 +279,30 @@ export const useCollateralSwapActions = ({
                         addLog?.('Requesting Signature (permit)...', 'warning');
                         // Add 1% buffer over srcAmount to cover slippage during execution
                         const permitAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
-                        const permitResult = await handleApprove(true, permitAmount);
+                        let permitResult;
+                        try {
+                            permitResult = await handleApprove(true, permitAmount);
+                        } catch (permitErr) {
+                            if (permitErr?.code === 'NO_PERMIT') {
+                                // aToken does not support EIP-2612 — fall back to on-chain approve
+                                addLog?.('Permit not supported for this token, using on-chain approve...', 'info');
+                                await handleApprove(false);
+                                setIsActionLoading(true);
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                                await fetchPositionData();
+                                // Continue with empty permitParams (on-chain approve was sent)
+                                permitResult = null;
+                            } else {
+                                throw permitErr; // real error (user rejection, network error, etc.)
+                            }
+                        }
                         setIsActionLoading(true); // Re-assert true because handleApprove finally block clears it
                         if (permitResult && permitResult.permit) {
                             permitParams = permitResult.permit;
-                        } else {
+                        } else if (permitResult !== null) {
                             throw new Error('Signature cancelled');
                         }
+                        // null means on-chain approve path was taken — continue without permit
                     }
                 } else {
                     addLog?.('Sending on-chain approval...', 'info');
