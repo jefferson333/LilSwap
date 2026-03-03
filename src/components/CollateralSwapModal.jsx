@@ -21,13 +21,14 @@ import { useParaswapQuote } from '../hooks/useParaswapQuote.js';
 import { useCollateralSwapActions } from '../hooks/useCollateralSwapActions.js';
 import { useUserPosition } from '../hooks/useUserPosition.js';
 import { useCollateralPositions } from '../hooks/useCollateralPositions.js';
-import { getUserPosition } from '../services/api.js';
+import { getUserPosition, getCollateralQuote } from '../services/api.js';
 import { useToast } from '../context/ToastContext.jsx';
 import { Copy } from 'lucide-react';
 
 import logger, { getLogLevel } from '../utils/logger.js';
 import { calcApprovalAmount } from '../utils/swapMath.js';
 import { getTokenLogo, onTokenImgError } from '../utils/getTokenLogo.js';
+import { getPairStatus, checkPairSwappable } from '../services/tokenPairCache.js';
 
 
 const UserRejectedAlert = ({ onClose }) => {
@@ -435,6 +436,9 @@ export const CollateralSwapModal = ({
     const prevFromTokenAddrRef = useRef('');
     const prevToTokenAddrRef = useRef('');
     const [freezeQuote, setFreezeQuote] = useState(false);
+    // Track which destination tokens are swappable with current fromToken
+    // Format: { 'tokenAddress': { swappable: bool, checking: bool } }
+    const [swappableTokens, setSwappableTokens] = useState({});
     const slippageMenuRef = useRef(null);
 
     const [tokenSelectorOpen, setTokenSelectorOpen] = useState(false);
@@ -580,6 +584,8 @@ export const CollateralSwapModal = ({
         fetchQuote,
         clearQuote,
         resetRefreshCountdown,
+        quoteError,
+        setQuoteError,
     } = useParaswapQuote({
         sellAmount: swapAmount,
         isCollateral: true,
@@ -593,6 +599,17 @@ export const CollateralSwapModal = ({
         enabled: isOpen,
         freezeQuote,
     });
+
+    // Show toast notification when quote error occurs
+    useEffect(() => {
+        if (quoteError && isOpen) {
+            addToast({
+                message: `Unable to quote swap: ${quoteError.message || 'This token pair may not be available'}`,
+                type: 'error',
+                duration: 5000
+            });
+        }
+    }, [quoteError, isOpen, addToast]);
 
     // When the user changes the source token: clear the input amount and quote.
     // The destination token is preserved UNLESS it's the same asset as the new fromToken
@@ -801,6 +818,85 @@ export const CollateralSwapModal = ({
 
         return { swappable: !notBorrowable, reasons };
     }, []);
+
+    /**
+     * Check if a destination token is swappable with the current fromToken
+     * Returns cached result if available, otherwise marks as "checking"
+     */
+    const getSwappableStatus = useCallback((destToken) => {
+        if (!fromToken || !destToken || fromToken.address === destToken.address) {
+            return { swappable: false, checking: false, reason: 'Same token' };
+        }
+
+        // Check cache first
+        const cacheStatus = getPairStatus(fromToken.address, destToken.address, effectiveNetwork?.chainId);
+        if (cacheStatus !== null) {
+            return {
+                swappable: cacheStatus.swappable,
+                checking: false,
+                reason: cacheStatus.swappable ? null : 'Not swappable on ParaSwap'
+            };
+        }
+
+        // Not in cache - check if we're currently validating
+        const tokenAddr = destToken.address?.toLowerCase();
+        if (swappableTokens[tokenAddr]?.checking) {
+            return { swappable: null, checking: true, reason: 'Checking...' };
+        }
+
+        return { swappable: null, checking: false, reason: null };
+    }, [fromToken, effectiveNetwork?.chainId, swappableTokens]);
+
+    /**
+     * Trigger background validation of a token pair for swappability
+     * Updates swappableTokens state as validation completes
+     */
+    const validatePairSwappability = useCallback(async (destToken) => {
+        if (!fromToken || !destToken || !effectiveNetwork?.chainId) return;
+        if (fromToken.address === destToken.address) return;
+
+        // Check if already cached or validating
+        const cacheStatus = getPairStatus(fromToken.address, destToken.address, effectiveNetwork.chainId);
+        if (cacheStatus !== null) {
+            // Already cached, no need to validate
+            return;
+        }
+
+        const tokenAddr = destToken.address?.toLowerCase();
+        if (swappableTokens[tokenAddr]?.checking) {
+            // Already validating
+            return;
+        }
+
+        // Mark as checking
+        setSwappableTokens(prev => ({
+            ...prev,
+            [tokenAddr]: { swappable: null, checking: true }
+        }));
+
+        try {
+            const isSwappable = await checkPairSwappable(
+                fromToken,
+                destToken,
+                effectiveNetwork.chainId,
+                getCollateralQuote,
+                { adapterAddress: account, walletAddress: account }
+            );
+
+            // Update state with result
+            setSwappableTokens(prev => ({
+                ...prev,
+                [tokenAddr]: { swappable: isSwappable, checking: false }
+            }));
+        } catch (error) {
+            logger.warn('[CollateralSwapModal] Pair validation error:', error);
+            // Mark as failed validation
+            setSwappableTokens(prev => ({
+                ...prev,
+                [tokenAddr]: { swappable: false, checking: false }
+            }));
+        }
+    }, [fromToken, effectiveNetwork?.chainId, account, swappableTokens]);
 
     // Clear transaction errors when key data changes so old errors don't persist
     useEffect(() => {
@@ -1216,6 +1312,26 @@ export const CollateralSwapModal = ({
                     </div>
                 )}
 
+                {/* Quote Error Display */}
+                {quoteError && (
+                    <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-700/50 p-2 rounded-lg">
+                        <div className="flex items-start gap-2 text-xs">
+                            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5 flex-none" />
+                            <p className="text-amber-900 dark:text-amber-100 leading-snug flex-1">
+                                {quoteError.message || 'This token pair may not have sufficient liquidity on ParaSwap'}
+                            </p>
+                            <button
+                                onClick={() => fetchQuote()}
+                                className="text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-100 font-medium text-xs whitespace-nowrap px-2 py-0.5 rounded border border-amber-300 dark:border-amber-600/50 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors flex-none disabled:opacity-50"
+                                disabled={isQuoteLoading}
+                                title="Retry quote"
+                            >
+                                {isQuoteLoading ? 'Loading...' : 'Retry'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
                 {/* Error Display */}
                 {txError && (
                     <div className="bg-red-950/40 border border-red-500/30 p-3 rounded-xl">
@@ -1360,7 +1476,30 @@ export const CollateralSwapModal = ({
 
                                     return list.map((token) => {
                                         const status = getBorrowStatus ? getBorrowStatus(token) : { swappable: true };
-                                        const disabled = !status.swappable;
+                                        let disabled = !status.swappable;
+                                        let reasons = status.reasons || [];
+
+                                        // For destination token, also check swappability
+                                        if (!selectingForFrom && fromToken && fromToken.address !== token.address) {
+                                            const swappableStatus = getSwappableStatus(token);
+
+                                            // Trigger background validation if not cached
+                                            if (swappableStatus.swappable === null && !swappableStatus.checking) {
+                                                validatePairSwappability(token);
+                                            }
+
+                                            // Only disable if we know it's not swappable (cached result)
+                                            if (swappableStatus.swappable === false && !swappableStatus.checking) {
+                                                disabled = true;
+                                                reasons = [...reasons, 'Not swappable on ParaSwap'];
+                                            }
+
+                                            // Show checking status as subtitle if validating
+                                            if (swappableStatus.checking) {
+                                                reasons = [...reasons, 'Checking swap availability...'];
+                                            }
+                                        }
+
                                         return (
                                             <button
                                                 key={token.underlyingAsset || token.address}
@@ -1387,6 +1526,7 @@ export const CollateralSwapModal = ({
                                                     setSelectingForFrom(false);
                                                     setTokenSelectorOpen(false);
                                                 }}
+                                                title={reasons.length > 0 ? reasons.join(', ') : undefined}
                                                 className={`w-full text-left px-3 py-2 rounded-lg mb-1 ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-slate-100 dark:hover:bg-slate-800'}`}
                                             >
                                                 <div className="flex items-center gap-3">
@@ -1403,7 +1543,9 @@ export const CollateralSwapModal = ({
                                                     </div>
                                                     <div className="flex-1">
                                                         <div className="font-bold text-slate-900 dark:text-white text-sm">{token.symbol}</div>
-                                                        <div className="text-xs text-slate-500 dark:text-slate-400">{token.name}</div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                                                            {reasons.length > 0 ? reasons.join(', ') : token.name}
+                                                        </div>
                                                     </div>
                                                     {!disabled && <div className="text-xs text-slate-400">{(token.variableBorrowRate ?? token.borrowRate) != null ? `${((token.variableBorrowRate ?? token.borrowRate) * 100).toFixed(2)}%` : '-'}</div>}
                                                 </div>

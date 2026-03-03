@@ -104,8 +104,9 @@ export const getDebtQuote = async (params, signal = null) => {
             logger.debug('Debt quote request cancelled');
             throw error; // Let the caller handle or ignore
         }
-        const errorMessage = error.response?.data?.error || error.message || 'Error fetching quote';
-        logger.error('Failed to get debt quote', { error: errorMessage });
+        const userMessage = error.response?.data?.userMessage;
+        const errorMessage = userMessage || error.response?.data?.error || error.message || 'Error fetching quote';
+        logger.error('Failed to get debt quote', { error: errorMessage, details: error.response?.data });
         throw new Error(errorMessage);
     }
 };
@@ -185,8 +186,9 @@ export const getCollateralQuote = async (params, signal = null) => {
             logger.debug('Collateral quote request cancelled');
             throw error; // Let the caller handle or ignore
         }
-        const errorMessage = error.response?.data?.error || error.message || 'Error fetching collateral quote';
-        logger.error('Failed to get collateral quote', { error: errorMessage });
+        const userMessage = error.response?.data?.userMessage;
+        const errorMessage = userMessage || error.response?.data?.error || error.message || 'Error fetching collateral quote';
+        logger.error('Failed to get collateral quote', { error: errorMessage, details: error.response?.data });
         throw new Error(errorMessage);
     }
 };
