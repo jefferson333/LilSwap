@@ -589,6 +589,7 @@ export const DebtSwapModal = ({
         setInputValue('');
         setSwapAmount(BigInt(0));
         clearQuote && clearQuote();
+        setFreezeQuote(false);
 
         // Check if the current toToken conflicts with the newly-selected fromToken.
         // Read toToken directly from the closure (not via functional updater) so that
@@ -620,6 +621,7 @@ export const DebtSwapModal = ({
         prevToTokenAddrRef.current = newAddr;
 
         clearQuote && clearQuote();
+        setFreezeQuote(false);
     }, [toToken, isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Actions hook
@@ -1345,6 +1347,8 @@ export const DebtSwapModal = ({
                                                 onClick={() => {
                                                     if (selectingForFrom) {
                                                         setFromToken(token);
+                                                        setInputValue('');
+                                                        setSwapAmount(BigInt(0));
                                                         // Batch: if current toToken matches new fromToken, pick a fallback immediately
                                                         const newAddr = (token.underlyingAsset || token.address || '').toLowerCase();
                                                         const curToAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
@@ -1357,6 +1361,8 @@ export const DebtSwapModal = ({
                                                         }
                                                     } else {
                                                         setToToken(token);
+                                                        setInputValue('');
+                                                        setSwapAmount(BigInt(0));
                                                     }
                                                     setSelectingForFrom(false);
                                                     setTokenSelectorOpen(false);

@@ -73,12 +73,15 @@ export const useCollateralSwapActions = ({
     const chainId = targetNetwork.chainId;
     const targetHexChainId = targetNetwork.hexChainId;
 
-    // Clear stale permit/error state when token changes — prevents reuse of wrong token's permit
+    // Clear ALL stale action state when EITHER token changes (from or to)
+    // This prevents reuse of wrong token's permit, stale errors, and zombie loading state
     useEffect(() => {
         setSignedPermit(null);
         setTxError(null);
         setUserRejected(false);
-    }, [fromToken?.symbol, fromToken?.address]);
+        setIsActionLoading(false);
+        setIsSigning(false);
+    }, [fromToken?.symbol, fromToken?.address, toToken?.symbol, toToken?.address]);
 
     const ensureWalletNetwork = useCallback(async () => {
         if (!provider) {

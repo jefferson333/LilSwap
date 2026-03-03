@@ -598,6 +598,7 @@ export const CollateralSwapModal = ({
         setInputValue('');
         setSwapAmount(BigInt(0));
         clearQuote && clearQuote();
+        setFreezeQuote(false);
 
         // Check if the current toToken conflicts with the newly-selected fromToken.
         // Read toToken directly from the closure (not via functional updater) so that
@@ -619,9 +620,8 @@ export const CollateralSwapModal = ({
         }
     }, [fromToken, isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // When the destination token changes, clear the stale quote so the UI shows a
-    // loading state while a fresh quote is fetched. Source amount is preserved so
-    // the auto-quote can fire immediately with the existing input value.
+    // When the destination token changes, clear stale quote and unfreeze so the auto-quote
+    // can fire immediately with the existing input value.
     useEffect(() => {
         if (!isOpen) return;
         const newAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
@@ -629,6 +629,7 @@ export const CollateralSwapModal = ({
         prevToTokenAddrRef.current = newAddr;
 
         clearQuote && clearQuote();
+        setFreezeQuote(false);
     }, [toToken, isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Actions hook
@@ -1356,6 +1357,8 @@ export const CollateralSwapModal = ({
                                                 onClick={() => {
                                                     if (selectingForFrom) {
                                                         setFromToken(token);
+                                                        setInputValue('');
+                                                        setSwapAmount(BigInt(0));
                                                         // Batch: if current toToken matches new fromToken, pick a fallback immediately
                                                         const newAddr = (token.underlyingAsset || token.address || '').toLowerCase();
                                                         const curToAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
@@ -1368,6 +1371,8 @@ export const CollateralSwapModal = ({
                                                         }
                                                     } else {
                                                         setToToken(token);
+                                                        setInputValue('');
+                                                        setSwapAmount(BigInt(0));
                                                     }
                                                     setSelectingForFrom(false);
                                                     setTokenSelectorOpen(false);
