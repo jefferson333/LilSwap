@@ -62,6 +62,11 @@ apiClient.interceptors.response.use(
             return apiClient(config);
         }
 
+        // Ignore canceled/aborted requests (expected when switching tokens)
+        if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError' || error.name === 'AbortError' || error.message === 'canceled') {
+            return Promise.reject(error);
+        }
+
         logger.error('API Request Failed', {
             url: config?.url,
             method: config?.method,

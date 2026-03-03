@@ -5,7 +5,7 @@ import { DEFAULT_NETWORK } from '../constants/networks.js';
 import { ABIS } from '../constants/abis.js';
 import { buildCollateralSwapTx } from '../services/api.js';
 import { recordTransactionHash, confirmTransactionOnChain, rejectTransaction, failTransaction } from '../services/transactionsApi.js';
-import logger from '../utils/logger.js';
+import logger, { isUserRejectedError } from '../utils/logger.js';
 
 export const useCollateralSwapActions = ({
     account,
@@ -169,7 +169,12 @@ export const useCollateralSwapActions = ({
             return permitParams;
         } catch (err) {
             if (err?.code !== 'NO_PERMIT') {
-                addLog?.('Signature failed: ' + (err?.message || err), 'error');
+                if (isUserRejectedError(err)) {
+                    addLog?.('Signature request cancelled by user.', 'warning');
+                    logger.info('[useCollateralSwapActions] Signature cancelled by user');
+                } else {
+                    addLog?.('Signature failed: ' + (err?.message || err), 'error');
+                }
             }
             throw err;
         }
@@ -217,7 +222,12 @@ export const useCollateralSwapActions = ({
             fetchPositionData();
             return { type: 'tx', tx };
         } catch (error) {
-            addLog?.('Approval error: ' + (error?.message || error), 'error');
+            if (isUserRejectedError(error)) {
+                addLog?.('Approval cancelled by user.', 'warning');
+                logger.info('[useCollateralSwapActions] Approval cancelled by user');
+            } else {
+                addLog?.('Approval error: ' + (error?.message || error), 'error');
+            }
             throw error;
         } finally {
             setIsSigning(false);
@@ -253,6 +263,24 @@ export const useCollateralSwapActions = ({
             }
         }
 
+        // Validate quote freshness (align with debt swap robustness)
+        const now = Math.floor(Date.now() / 1000);
+        const quoteAge = now - (activeQuote.timestamp || 0);
+        logger.debug('[handleSwap] Quote age check:', { quoteAge, timestamp: activeQuote.timestamp });
+
+        if (quoteAge > 300) {
+            logger.debug('[handleSwap] Quote too old, refreshing...');
+            addLog?.(`⚠️ Quote is too old (${quoteAge}s). Updating...`, 'warning');
+            activeQuote = await fetchQuote();
+            if (!activeQuote) {
+                logger.error('[handleSwap] ❌ Failed to refresh quote');
+                addLog?.('Failed to refresh quote', 'error');
+                return;
+            }
+        }
+
+        logger.debug('[handleSwap] Quote validated, proceeding...');
+
         setIsActionLoading(true);
 
         try {
@@ -264,12 +292,13 @@ export const useCollateralSwapActions = ({
             const srcAmountBigInt = typeof srcAmount === 'bigint' ? srcAmount : BigInt(srcAmount);
             let permitParams = { amount: 0, deadline: 0, v: 0, r: ethers.ZeroHash, s: ethers.ZeroHash };
 
-            let aTokenAddr = fromToken.aTokenAddress;
+            // Use quote's fromToken for aTokenAddr lookup (not closure fromToken) to avoid stale state
+            let aTokenAddr = quoteFrom.aTokenAddress;
             if (!isValidATokenAddress(aTokenAddr)) {
                 logger.debug('[handleSwap] aTokenAddr invalid/precompile, fetching from DATA_PROVIDER:', aTokenAddr);
                 // Use DATA_PROVIDER.getReserveTokensAddresses — simpler than POOL.getReserveData, immune to struct changes
                 const dataProvider = new ethers.Contract(networkAddresses.DATA_PROVIDER, ABIS.DATA_PROVIDER, networkRpcProvider || signer);
-                const tokenAddresses = await dataProvider.getReserveTokensAddresses(fromToken.address || fromToken.underlyingAsset);
+                const tokenAddresses = await dataProvider.getReserveTokensAddresses(quoteFrom.address || quoteFrom.underlyingAsset);
                 aTokenAddr = tokenAddresses.aTokenAddress;
             }
 
@@ -443,14 +472,22 @@ export const useCollateralSwapActions = ({
             fetchPositionData();
 
         } catch (error) {
-            logger.error('[handleSwap] error:', error);
-            if (error.code === 'ACTION_REJECTED') {
+            if (isUserRejectedError(error)) {
+                logger.info('[handleSwap] User cancelled action', {
+                    code: error?.code,
+                    name: error?.name,
+                });
                 setUserRejected(true);
                 addLog?.('User rejected transaction.', 'warning');
                 if (localTxId) {
                     try { await rejectTransaction(localTxId, 'wallet_rejected'); } catch (e) { }
                 }
             } else {
+                logger.error('[handleSwap] error', {
+                    code: error?.code,
+                    message: error?.message,
+                    name: error?.name,
+                });
                 setTxError(error.message || 'Swap failed.');
                 addLog?.('FAILURE: ' + error.message, 'error');
             }
@@ -462,7 +499,8 @@ export const useCollateralSwapActions = ({
     }, [
         account, allowance, swapAmount, supplyBalance, swapQuote, fetchQuote, addLog, provider, slippage, clearQuote, fetchPositionData,
         resetRefreshCountdown, signedPermit, adapterAddress, networkAddresses, chainId, ensureWalletNetwork,
-        targetNetwork.label, preferPermit, forceRequirePermit, handleApprove, currentTransactionId, onTxSent
+        targetNetwork.label, preferPermit, forceRequirePermit, handleApprove, currentTransactionId, onTxSent,
+        fromToken, toToken, networkRpcProvider
     ]);
 
     const clearTxError = useCallback(() => setTxError(null), []);

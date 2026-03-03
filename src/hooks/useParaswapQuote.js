@@ -263,6 +263,12 @@ export const useParaswapQuote = ({
                 return quotePayload;
             }
         } catch (error) {
+            // Ignore canceled/aborted requests (expected when switching tokens)
+            if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError' || error.name === 'AbortError' || error.message === 'canceled') {
+                logger.debug('[useParaswapQuote] Quote request canceled (expected)');
+                return null;
+            }
+
             logger.error('[useParaswapQuote] Quote error:', error);
             addLog?.('Quote error: ' + error.message, 'error');
             setAutoRefreshEnabled(false);
@@ -306,6 +312,7 @@ export const useParaswapQuote = ({
     // so we never display stale quote data during the transition.
     const prevFromAddrRef = useRef('');
     const prevToAddrRef = useRef('');
+    const tokenJustChangedRef = useRef(false);
     useEffect(() => {
         const fromAddr = (fromToken?.address || fromToken?.underlyingAsset || '').toLowerCase();
         const toAddr = (toToken?.address || toToken?.underlyingAsset || '').toLowerCase();
@@ -313,10 +320,19 @@ export const useParaswapQuote = ({
         prevFromAddrRef.current = fromAddr;
         prevToAddrRef.current = toAddr;
         if (changed) {
+            // Invalidate in-flight requests to prevent stale responses from overwriting cleared state
+            quoteRequestIdRef.current += 1;
+            if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+            }
             setSwapQuote(null);
             setAutoRefreshEnabled(false);
             setIsQuoteLoading(false);
             resetRefreshCountdown();
+
+            // Mark that token just changed to skip debounce check on next auto-fetch
+            tokenJustChangedRef.current = true;
         }
     }, [fromToken?.address, fromToken?.underlyingAsset, toToken?.address, toToken?.underlyingAsset, resetRefreshCountdown]);
 
@@ -344,9 +360,16 @@ export const useParaswapQuote = ({
         }
 
         // 2. If the user is actively typing, wait for the debounce to catch up
-        if (currentAmount !== debouncedAmount) {
+        // UNLESS token just changed (then fetch immediately with current amount)
+        if (currentAmount !== debouncedAmount && !tokenJustChangedRef.current) {
             logger.debug('[useParaswapQuote] User is typing (current != debounced), waiting...');
             return;
+        }
+
+        // Clear the token-changed flag after using it
+        if (tokenJustChangedRef.current) {
+            logger.debug('[useParaswapQuote] Token just changed, fetching immediately without debounce wait');
+            tokenJustChangedRef.current = false;
         }
 
         // 3. Fallback checks
