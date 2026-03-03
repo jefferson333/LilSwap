@@ -29,6 +29,7 @@ export const useParaswapQuote = ({
     const [slippage, setSlippage] = useState(25);
     const [isQuoteLoading, setIsQuoteLoading] = useState(false);
     const [isTyping, setIsTyping] = useState(false);
+    const [quoteError, setQuoteError] = useState(null);
 
     // Track the current quote request to prevent stale responses from overriding cleared state
     const quoteRequestIdRef = useRef(0);
@@ -49,6 +50,7 @@ export const useParaswapQuote = ({
             abortControllerRef.current = null;
         }
         setSwapQuote(null);
+        setQuoteError(null);
         setAutoRefreshEnabled(false);
         resetRefreshCountdown();
     }, [resetRefreshCountdown]);
@@ -182,6 +184,7 @@ export const useParaswapQuote = ({
                 }
 
                 setSwapQuote(quotePayload);
+                setQuoteError(null);
                 setAutoRefreshEnabled(true);
                 onQuoteLoaded?.(quotePayload);
                 return quotePayload;
@@ -258,6 +261,7 @@ export const useParaswapQuote = ({
                 }
 
                 setSwapQuote(quotePayload);
+                setQuoteError(null);
                 setAutoRefreshEnabled(true);
                 onQuoteLoaded?.(quotePayload);
                 return quotePayload;
@@ -271,6 +275,12 @@ export const useParaswapQuote = ({
 
             logger.error('[useParaswapQuote] Quote error:', error);
             addLog?.('Quote error: ' + error.message, 'error');
+            setQuoteError({
+                message: error.message || 'Failed to fetch quote',
+                type: 'QUOTE_ERROR',
+                timestamp: new Date().toISOString()
+            });
+            setSwapQuote(null);
             setAutoRefreshEnabled(false);
             return null;
         } finally {
@@ -418,5 +428,7 @@ export const useParaswapQuote = ({
         clearQuote,
         isQuoteLoading,
         isTyping,
+        quoteError,
+        setQuoteError,
     };
 };
