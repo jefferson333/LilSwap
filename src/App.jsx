@@ -1,3 +1,4 @@
+import { useState, lazy, Suspense, useRef, useEffect } from 'react';
 import { Wallet, LogOut, ChevronDown, Eye, EyeOff, Moon, Sun } from 'lucide-react';
 import { useWeb3 } from './context/web3Context.js';
 import { InfoTooltip } from './components/InfoTooltip.jsx';
