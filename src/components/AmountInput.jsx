@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ethers } from 'ethers';
 import logger from '../utils/logger.js';
+import { normalizeDecimalInput } from '../utils/normalizeDecimalInput.js';
 /**
  * AmountInput Component
  * Allows the user to select a specific amount for swap
@@ -58,7 +59,7 @@ export const AmountInput = ({
     };
 
     const handleInputChange = (e) => {
-        const value = e.target.value;
+        const normalized = normalizeDecimalInput(e.target.value);
 
         // Mark that user is manually editing
         isEditingRef.current = true;
@@ -67,28 +68,33 @@ export const AmountInput = ({
             isEditingRef.current = false;
         }, 500); // Clear flag 500ms after user stops typing
 
-        // Allow only numbers and decimal point
-        if (value === '' || /^\d*\.?\d*$/.test(value)) {
-            setInputValue(value);
-            setSelectedPercentage(null); // Clear percentage selection on manual input
+        setInputValue(normalized);
+        setSelectedPercentage(null); // Clear percentage selection on manual input
 
-            try {
-                if (value === '' || value === '.') {
-                    onAmountChange(BigInt(0));
+        try {
+            if (!normalized) {
+                onAmountChange(BigInt(0));
+            } else {
+                const parsable = normalized.endsWith('.') ? `${normalized.slice(0, -1) || '0'}` : normalized;
+                const parsedAmount = ethers.parseUnits(parsable, decimals);
+                // Validate that input doesn't exceed max
+                if (parsedAmount > maxAmount) {
+                    onAmountChange(maxAmount);
                 } else {
-                    const parsedAmount = ethers.parseUnits(value, decimals);
-                    // Validate that input doesn't exceed max
-                    if (parsedAmount > maxAmount) {
-                        onAmountChange(maxAmount);
-                    } else {
-                        onAmountChange(parsedAmount);
-                    }
+                    onAmountChange(parsedAmount);
                 }
-            } catch (error) {
-                // Invalid input, ignore
-                logger.warn('Invalid input:', value);
             }
+        } catch (error) {
+            // Invalid input, ignore
+            logger.warn('Invalid input:', normalized);
         }
+    };
+
+    const handleInputPaste = (e) => {
+        const pastedText = e.clipboardData?.getData('text') || '';
+        const normalized = normalizeDecimalInput(pastedText);
+        e.preventDefault();
+        handleInputChange({ target: { value: normalized } });
     };
 
     const percentageButtons = [
@@ -126,6 +132,7 @@ export const AmountInput = ({
                     type="text"
                     value={inputValue}
                     onChange={handleInputChange}
+                    onPaste={handleInputPaste}
                     placeholder="0.00"
                     className={`w-full bg-slate-800 text-white text-2xl font-mono font-bold px-4 py-3 rounded-lg border-2 border-slate-700 focus:border-purple-500 focus:outline-none transition-colors ${hasInlineSelector ? 'pr-20' : ''}`}
                 />
