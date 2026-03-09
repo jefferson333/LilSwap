@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { AaveV3Ethereum, AaveV3Base, AaveV3Polygon, AaveV3BNB, AaveV3Arbitrum } from '@bgd-labs/aave-address-book';
+import { AaveV3Ethereum, AaveV3Base, AaveV3Polygon, AaveV3BNB, AaveV3Arbitrum, AaveV3Avalanche } from '@bgd-labs/aave-address-book';
 
 import logger from '../utils/logger.js';
 /**
@@ -29,6 +29,7 @@ const getOfficialAddressBook = (chainId) => {
         137: AaveV3Polygon,
         8453: AaveV3Base,
         42161: AaveV3Arbitrum,
+        43114: AaveV3Avalanche,
     };
     return bookMap[chainId] || null;
 };
@@ -186,6 +187,35 @@ export const NETWORKS = {
                 'https://arbitrum-one.public.blastapi.io',
                 'https://arbitrum.publicnode.com',
                 'https://1rpc.io/arb'
+            ],
+            addresses: {
+                POOL: normalizeAddress(book?.POOL),
+                DEBT_SWAP_ADAPTER: normalizeAddress(book?.DEBT_SWAP_ADAPTER || book?.DebtSwapAdapter),
+                SWAP_COLLATERAL_ADAPTER: normalizeAddress(book?.SWAP_COLLATERAL_ADAPTER || book?.SwapCollateralAdapter),
+                DATA_PROVIDER: normalizeAddress(book?.AAVE_PROTOCOL_DATA_PROVIDER || book?.ProtocolDataProvider),
+                AUGUSTUS: {
+                    V5: AUGUSTUS_ADDRESSES.V5,
+                    V6_2: AUGUSTUS_ADDRESSES.V6_2,
+                },
+
+            },
+        };
+    })(),
+    AVALANCHE: (() => {
+        const book = getOfficialAddressBook(43114);
+        return {
+            key: 'AVALANCHE',
+            label: 'Avalanche C-Chain',
+            shortLabel: 'Avalanche',
+            chainId: 43114,
+            hexChainId: '0xa86a',
+            icon: '/icons/networks/avalanche.svg',
+
+            explorer: 'https://snowtrace.io',
+            rpcUrls: [
+                'https://api.avax.network/ext/bc/C/rpc',
+                'https://avalanche.drpc.org',
+                'https://avax.meowrpc.com'
             ],
             addresses: {
                 POOL: normalizeAddress(book?.POOL),

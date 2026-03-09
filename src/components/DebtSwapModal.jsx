@@ -30,6 +30,7 @@ import logger, { getLogLevel } from '../utils/logger.js';
 import { calcApprovalAmount } from '../utils/swapMath.js';
 import { getTokenLogo, onTokenImgError } from '../utils/getTokenLogo.js';
 import { normalizeDecimalInput } from '../utils/normalizeDecimalInput.js';
+import { mapErrorToUserFriendly } from '../utils/errorMapping.js';
 import { getPairStatus, checkPairSwappable } from '../services/tokenPairCache.js';
 
 
@@ -1152,6 +1153,56 @@ export const DebtSwapModal = ({
                     )}
                 </div>
 
+                {/* Safety Alerts */}
+                {(() => {
+                    const currentHf = parseFloat(summary?.healthFactor || '0');
+                    const currentTotalCollateralUSD = parseFloat(summary?.totalCollateralUSD) || 0;
+                    const currentLiquidationThreshold = parseFloat(summary?.currentLiquidationThreshold) || 0;
+                    const currentTotalBorrowsUSD = parseFloat(summary?.totalBorrowsUSD) || 0;
+
+                    let simulatedHf = currentHf;
+
+                    if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
+                        try {
+                            const reducedDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, fromToken.decimals || 18));
+                            const newDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
+
+                            const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
+                            const fromMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
+                            const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
+
+                            const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
+                            const toMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                            const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
+
+                            if (fromPrice > 0 && toPrice > 0) {
+                                const repaidDebtUsd = reducedDebtAmountF * fromPrice;
+                                const newDebtUsd = newDebtAmountF * toPrice;
+
+                                const newTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
+
+                                if (newTotalBorrowsUSD > 0) {
+                                    simulatedHf = (currentTotalCollateralUSD * currentLiquidationThreshold) / newTotalBorrowsUSD;
+                                } else {
+                                    simulatedHf = -1;
+                                }
+                            }
+                        } catch (e) { }
+                    }
+
+                    if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0) {
+                        return (
+                            <div className="mb-2 px-1">
+                                <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 flex items-start gap-2 text-xs text-red-900 dark:text-red-100">
+                                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-500 shrink-0 mt-0.5" />
+                                    <p className="leading-snug">Liquidation Risk: This swap will leave your Health Factor very low ({simulatedHf === -1 ? '∞' : simulatedHf.toFixed(2)}). Aave may block the operation.</p>
+                                </div>
+                            </div>
+                        );
+                    }
+                    return null;
+                })()}
+
                 {/* To Token Row (Selector + Quote Result) */}
                 <div className="bg-slate-100 dark:bg-slate-800 border border-border-light dark:border-slate-700 rounded-xl p-1 px-2.5">
                     {/* Top Row: Amount & Token Selector */}
@@ -1284,7 +1335,7 @@ export const DebtSwapModal = ({
                         <div className="flex items-start gap-2 text-xs">
                             <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5 flex-none" />
                             <p className="text-amber-900 dark:text-amber-100 leading-snug flex-1">
-                                {quoteError.message || 'This token pair may not have sufficient liquidity on ParaSwap'}
+                                {mapErrorToUserFriendly(quoteError.message) || 'This token pair may not have sufficient liquidity on ParaSwap'}
                             </p>
                             <button
                                 onClick={() => fetchQuote()}

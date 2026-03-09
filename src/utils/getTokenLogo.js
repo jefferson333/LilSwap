@@ -37,6 +37,14 @@ const ALIAS = {
     PT_USDE_31JUL2025: 'ptusde',
     PT_USDE_5FEB2026: 'ptusde',
     PT_USDE_7MAY2026: 'ptusde',
+    // Avalanche specific bridging aliases
+    'BTC.B': 'btc',
+    'WETH.E': 'weth',
+    'DAI.E': 'dai',
+    'LINK.E': 'link',
+    // Avalanche native
+    WAVAX: 'wavax', // assuming wavax exists, otherwise fallback handles it
+    AUSD: 'ausd'
 };
 
 const DEV = typeof import.meta !== 'undefined' && import.meta.env?.DEV;

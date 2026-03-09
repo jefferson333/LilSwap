@@ -87,11 +87,14 @@ export const useAllPositions = (walletAddress, opts = {}) => {
 
     // Trigger refresh when user becomes active/tab visible if data is stale (> refreshInterval)
     useEffect(() => {
-        if (isTabVisible && isUserActive && lastFetch) {
+        if (isTabVisible && isUserActive) {
             const refreshInterval = opts.refreshIntervalMs || 90000;
-            if (Date.now() - lastFetch > refreshInterval) {
+            // Check if lastFetch exists and if time elapsed is greater than the refresh interval
+            if (lastFetch && (Date.now() - lastFetch > refreshInterval)) {
                 logger.debug('User returned and data is stale, refreshing...');
                 fetchPositions();
+            } else if (lastFetch) {
+                logger.debug('User returned but data is fresh, skipping refresh');
             }
         }
     }, [isTabVisible, isUserActive, lastFetch, fetchPositions, opts.refreshIntervalMs]);

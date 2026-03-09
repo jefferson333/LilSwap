@@ -30,6 +30,7 @@ import logger, { getLogLevel } from '../utils/logger.js';
 import { calcApprovalAmount } from '../utils/swapMath.js';
 import { getTokenLogo, onTokenImgError } from '../utils/getTokenLogo.js';
 import { normalizeDecimalInput } from '../utils/normalizeDecimalInput.js';
+import { mapErrorToUserFriendly } from '../utils/errorMapping.js';
 import { getPairStatus, checkPairSwappable } from '../services/tokenPairCache.js';
 
 // Format a numeric USD value to a compact string like "$1.21K" or "$1,234.56"
@@ -1161,6 +1162,82 @@ export const CollateralSwapModal = ({
                     )}
                 </div>
 
+                {/* Safety Alerts */}
+                {(() => {
+                    if (!toToken || !marketAssets) return null;
+                    const toAddr = (toToken.underlyingAsset || toToken.address || '').toLowerCase();
+                    const toMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                    const toCanBeCollateral = toMarketToken?.usageAsCollateralEnabled;
+
+                    // Calculate simulated HF for the warning (duplicate logic but necessary for current structure)
+                    const currentHf = parseFloat(summary?.healthFactor || '0');
+                    const currentTotalCollateralUSD = parseFloat(summary?.totalCollateralUSD) || 0;
+                    const currentLiquidationThreshold = parseFloat(summary?.currentLiquidationThreshold) || 0;
+                    const currentTotalBorrowsUSD = parseFloat(summary?.totalBorrowsUSD) || 0;
+
+                    let simulatedHf = currentHf;
+
+                    if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
+                        try {
+                            const srcAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, fromToken.decimals || 18));
+                            const destAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18));
+
+                            const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
+                            const fromMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
+                            const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
+                            const fromLiqThreshold = parseFloat(fromMarketToken?.reserveLiquidationThreshold) || 0;
+
+                            const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
+                            const toLiqThreshold = parseFloat(toMarketToken?.reserveLiquidationThreshold) || 0;
+
+                            if (fromPrice > 0 && toPrice > 0) {
+                                const withdrawnCollateralUsd = srcAmountF * fromPrice;
+                                const newCollateralUsd = destAmountF * toPrice;
+
+                                const currentCollateralPower = currentTotalCollateralUSD * currentLiquidationThreshold;
+                                const withdrawnCollateralPower = withdrawnCollateralUsd * fromLiqThreshold;
+                                const newCollateralPower = newCollateralUsd * toLiqThreshold;
+
+                                const newTotalCollateralPower = Math.max(0, currentCollateralPower - withdrawnCollateralPower + newCollateralPower);
+
+                                if (currentTotalBorrowsUSD > 0) {
+                                    simulatedHf = newTotalCollateralPower / currentTotalBorrowsUSD;
+                                } else {
+                                    simulatedHf = -1;
+                                }
+                            }
+                        } catch (e) { }
+                    }
+
+                    const alerts = [];
+                    if (toMarketToken && !toCanBeCollateral) {
+                        alerts.push({
+                            type: 'warning',
+                            message: `Warning: ${toToken.symbol} cannot be used as collateral on Aave. If you have active loans, this may reduce your Health Factor.`
+                        });
+                    }
+
+                    if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0) {
+                        alerts.push({
+                            type: 'danger',
+                            message: `Liquidation Risk: This swap will leave your Health Factor very low (${simulatedHf === -1 ? '∞' : simulatedHf.toFixed(2)}). Aave may block the operation.`
+                        });
+                    }
+
+                    if (alerts.length === 0) return null;
+
+                    return (
+                        <div className="space-y-2 mb-2 px-1">
+                            {alerts.map((alert, i) => (
+                                <div key={i} className={`p-2 rounded-lg flex items-start gap-2 text-xs ${alert.type === 'danger' ? 'bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 text-red-900 dark:text-red-100' : 'bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-100'}`}>
+                                    <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${alert.type === 'danger' ? 'text-red-600 dark:text-red-500' : 'text-amber-600 dark:text-amber-500'}`} />
+                                    <p className="leading-snug">{alert.message}</p>
+                                </div>
+                            ))}
+                        </div>
+                    );
+                })()}
+
                 {/* To Token Row (Selector + Quote Result) */}
                 <div className="bg-slate-100 dark:bg-slate-800 border border-border-light dark:border-slate-700 rounded-xl p-1 px-2.5">
                     {/* Top Row: Amount & Token Selector */}
@@ -1294,7 +1371,7 @@ export const CollateralSwapModal = ({
                         <div className="flex items-start gap-2 text-xs">
                             <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-500 shrink-0 mt-0.5 flex-none" />
                             <p className="text-amber-900 dark:text-amber-100 leading-snug flex-1">
-                                {quoteError.message || 'This token pair may not have sufficient liquidity on ParaSwap'}
+                                {mapErrorToUserFriendly(quoteError.message) || 'This token pair may not have sufficient liquidity on ParaSwap'}
                             </p>
                             <button
                                 onClick={() => fetchQuote()}
@@ -1514,13 +1591,12 @@ export const CollateralSwapModal = ({
                                     </div>
                                     <div className="text-right font-medium">
                                         {(() => {
-                                            if (!summary) return <span>-</span>;
-                                            const currentHf = parseFloat(summary.healthFactor);
-                                            if (isNaN(currentHf)) return <span>-</span>;
-
-                                            const currentTotalCollateralUSD = parseFloat(summary.totalCollateralUSD) || 0;
-                                            const currentLiquidationThreshold = parseFloat(summary.currentLiquidationThreshold) || 0;
-                                            const currentTotalBorrowsUSD = parseFloat(summary.totalBorrowsUSD) || 0;
+                                            // Move simulatedHf calculation to a useMemo above if possible, but for now we keep the logic here
+                                            // and also use it for the warning alert below.
+                                            const currentHf = parseFloat(summary?.healthFactor || '0');
+                                            const currentTotalCollateralUSD = parseFloat(summary?.totalCollateralUSD) || 0;
+                                            const currentLiquidationThreshold = parseFloat(summary?.currentLiquidationThreshold) || 0;
+                                            const currentTotalBorrowsUSD = parseFloat(summary?.totalBorrowsUSD) || 0;
 
                                             let simulatedHf = currentHf;
 
@@ -1627,6 +1703,37 @@ export const CollateralSwapModal = ({
                                                     <span className="text-slate-900 dark:text-slate-100">{currentLT === 0 ? '-' : currentLT.toFixed(0)}%</span>
                                                     <span className="text-slate-400 font-normal">→</span>
                                                     <span className="text-slate-900 dark:text-slate-100">{newLT === 0 ? '-' : newLT.toFixed(0)}%</span>
+                                                </>
+                                            );
+                                        })()}
+                                    </div>
+                                </div>
+
+                                {/* Collateralization Row */}
+                                <div className="flex justify-between items-center text-[13px] text-slate-600 dark:text-slate-300 font-medium">
+                                    <div className="flex items-center gap-1.5">
+                                        <span>Collateralization</span>
+                                        <InfoTooltip content="Whether this asset can be used as collateral (backing for loans)." size={12} />
+                                    </div>
+                                    <div className="text-right flex items-center gap-1.5">
+                                        {(() => {
+                                            const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
+                                            const fromMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
+                                            const fromCanBeCollateral = fromMarketToken?.usageAsCollateralEnabled;
+
+                                            const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
+                                            const toMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                                            const toCanBeCollateral = toMarketToken?.usageAsCollateralEnabled;
+
+                                            return (
+                                                <>
+                                                    <span className={fromCanBeCollateral ? 'text-emerald-500' : 'text-slate-400'}>
+                                                        {fromCanBeCollateral ? 'Enabled' : 'Disabled'}
+                                                    </span>
+                                                    <span className="text-slate-400 font-normal">→</span>
+                                                    <span className={toCanBeCollateral ? 'text-emerald-500' : 'text-amber-500 font-bold'}>
+                                                        {toCanBeCollateral ? 'Enabled' : 'Unavailable'}
+                                                    </span>
                                                 </>
                                             );
                                         })()}

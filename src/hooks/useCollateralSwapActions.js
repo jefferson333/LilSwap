@@ -462,7 +462,7 @@ export const useCollateralSwapActions = ({
                     txHash: tx.hash,
                 });
 
-                addLog?.('Tx enviada com sucesso, mas o RPC falhou ao retornar o recibo agora. A confirmação seguirá em background.', 'warning');
+                addLog?.('Transaction submitted successfully, but the RPC failed to return the receipt immediately. Confirmation will continue in the background.', 'warning');
 
                 // Do not mark as failure when hash is already sent and recorded.
                 clearQuote();
