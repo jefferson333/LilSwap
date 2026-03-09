@@ -1,5 +1,5 @@
 import React, { useState, useContext, useMemo, lazy, Suspense } from 'react';
-import { ArrowRightLeft, ChevronDown, ChevronUp, RefreshCw, AlertCircle, Network, ExternalLink } from 'lucide-react';
+import { ArrowRightLeft, ChevronDown, ChevronUp, RefreshCw, AlertCircle, Network, ExternalLink, Gift } from 'lucide-react';
 import { useAllPositions } from '../hooks/useAllPositions';
 import { toHexChainId } from '../utils/wallet';
 import { getNetworkByChainId } from '../constants/networks';
@@ -7,6 +7,7 @@ import { Web3Context } from '../context/web3Context.js';
 import logger from '../utils/logger';
 import { InfoTooltip } from './InfoTooltip';
 import { getTokenLogo, onTokenImgError } from '../utils/getTokenLogo';
+import { DonateModal } from './DonateModal.jsx';
 
 // Lazy load Swap Modals
 const DebtSwapModal = lazy(() => import('./DebtSwapModal.jsx').then(module => ({ default: module.DebtSwapModal })));
@@ -64,6 +65,7 @@ export const PositionsAccordion = ({ walletAddress }) => {
         supplies: [],
         isCollateral: false
     });
+    const [isDonateOpen, setIsDonateOpen] = useState(false);
 
     // Handle opening swap modal and switching chain
     const handleOpenSwap = async (chainId, asset, marketAssets, borrows = [], supplies = [], isCollateral = false) => {
@@ -265,6 +267,19 @@ export const PositionsAccordion = ({ walletAddress }) => {
                     </div>
                 )}
 
+                {/* Mobile Promo Container */}
+                {!donator.isDonator && (
+                    <div className="flex sm:hidden justify-center w-full -mt-1.5 mb-2 sm:mt-0 sm:mb-0">
+                        <button
+                            onClick={() => setIsDonateOpen(true)}
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-linear-to-r from-primary/20 to-fuchsia-500/20 text-primary border border-primary/40 shadow-[0_0_10px_rgba(168,85,247,0.1)] hover:shadow-[0_0_15px_rgba(168,85,247,0.5)] hover:scale-105 active:scale-95 transition-all animate-pulse"
+                        >
+                            <Gift className="w-3 h-3" />
+                            <span>Get 10% Fee Discount</span>
+                        </button>
+                    </div>
+                )}
+
                 {/* Main Row */}
                 <div className="flex justify-between items-center w-full">
                     <div className="flex items-center gap-2">
@@ -294,6 +309,25 @@ export const PositionsAccordion = ({ walletAddress }) => {
                                         {donator.type === 'Donator' ? 'DONATOR Detected!' : 'PARTNER Detected!'}
                                     </span>
                                 </InfoTooltip>
+                            </div>
+                        )}
+
+                        {/* Desktop Promo Container */}
+                        {!donator.isDonator && (
+                            <div className="hidden sm:flex items-center">
+                                <button
+                                    onClick={() => setIsDonateOpen(true)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold bg-linear-to-r from-primary/20 via-purple-500/20 to-fuchsia-500/20 text-primary border border-primary/40 shadow-[0_0_10px_rgba(168,85,247,0.1)] hover:shadow-[0_0_15px_rgba(168,85,247,0.5)] hover:scale-105 active:scale-95 transition-all group"
+                                >
+                                    <Gift className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+                                    <span className="relative">
+                                        Get 10% Fee Discount
+                                        <span className="absolute -top-1 -right-2 flex h-2 w-2">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                                        </span>
+                                    </span>
+                                </button>
                             </div>
                         )}
                     </div>
@@ -616,6 +650,8 @@ export const PositionsAccordion = ({ walletAddress }) => {
                     />
                 )}
             </Suspense>
+
+            <DonateModal isOpen={isDonateOpen} onClose={() => setIsDonateOpen(false)} />
         </div>
     );
 };

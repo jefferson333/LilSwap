@@ -29,8 +29,8 @@ import { Copy } from 'lucide-react';
 import logger, { getLogLevel } from '../utils/logger.js';
 import { calcApprovalAmount } from '../utils/swapMath.js';
 import { getTokenLogo, onTokenImgError } from '../utils/getTokenLogo.js';
+import { normalizeDecimalInput } from '../utils/normalizeDecimalInput.js';
 import { getPairStatus, checkPairSwappable } from '../services/tokenPairCache.js';
-
 
 
 
@@ -254,10 +254,12 @@ const CompactAmountInputRow = ({ token, value, onChange, maxAmount, decimals, di
                         type="text"
                         value={value}
                         onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
-                                onChange(val);
-                            }
+                            onChange(normalizeDecimalInput(e.target.value));
+                        }}
+                        onPaste={(e) => {
+                            const pastedText = e.clipboardData?.getData('text') || '';
+                            e.preventDefault();
+                            onChange(normalizeDecimalInput(pastedText));
                         }}
                         placeholder="0.00"
                         disabled={disabled}
@@ -726,19 +728,21 @@ export const DebtSwapModal = ({
 
     // Handle input change
     const handleInputChange = useCallback((value) => {
-        setInputValue(value);
+        const normalized = normalizeDecimalInput(value);
+        setInputValue(normalized);
         try {
-            if (!value || value === '' || value === '.') {
+            if (!normalized) {
                 setSwapAmount(BigInt(0));
             } else {
-                const parsed = ethers.parseUnits(value, fromToken?.decimals || 18);
+                const parsable = normalized.endsWith('.') ? `${normalized.slice(0, -1) || '0'}` : normalized;
+                const parsed = ethers.parseUnits(parsable, fromToken?.decimals || 18);
                 const maxAmt = debtBalance || BigInt(0);
                 const finalAmount = parsed > maxAmt ? maxAmt : parsed;
 
                 setSwapAmount(finalAmount);
             }
         } catch (error) {
-            logger.warn('Invalid input:', value, error);
+            logger.warn('Invalid input:', normalized, error);
         }
     }, [fromToken?.decimals, debtBalance]);
 
@@ -1195,9 +1199,6 @@ export const DebtSwapModal = ({
                                         className="w-full h-full object-cover"
                                         onError={onTokenImgError(toToken.symbol)}
                                     />
-                                    <span className="text-[10px] font-bold text-slate-500 uppercase" style={{ display: 'none' }}>
-                                        {toToken.symbol?.[0] || '?'}
-                                    </span>
                                 </div>
                             ) : (
                                 <span className="text-xs font-bold text-slate-400">?</span>
