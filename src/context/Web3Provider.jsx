@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ethers } from 'ethers';
 import { createAppKit, useAppKitProvider, useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react';
 import { EthersAdapter } from '@reown/appkit-adapter-ethers';
-import { mainnet, bsc, polygon, base, arbitrum } from '@reown/appkit/networks';
+import { mainnet, bsc, polygon, base, arbitrum, avalanche } from '@reown/appkit/networks';
 import { Web3Context } from './web3Context.js';
 import { DEFAULT_NETWORK, NETWORKS, getNetworkByChainId } from '../constants/networks.js';
 import { createRpcProvider } from '../helpers/rpcHelper.js';
@@ -12,12 +12,20 @@ import logger from '../utils/logger.js';
 const projectId = import.meta.env.VITE_REOWN_PROJECT_ID || 'b8480dbf6f1c429fb1e3fcbefa80c920';
 
 // Define networks for AppKit
-const appKitNetworks = [mainnet, arbitrum, polygon, base, bsc];
+const appKitNetworks = [mainnet, arbitrum, polygon, base, bsc, avalanche];
+
+const metadata = {
+    name: 'LilSwap',
+    description: 'DeFi Portfolio Optimization for Aave',
+    url: 'https://lilswap.xyz',
+    icons: ['https://lilswap.xyz/favicon.png']
+};
 
 // Initialize AppKit configuration
 const appKitConfig = {
     adapters: [new EthersAdapter()],
     networks: appKitNetworks,
+    metadata,
     projectId,
     features: {
         analytics: true,
@@ -53,7 +61,7 @@ export const Web3Provider = ({ children }) => {
     const [isConnecting, setIsConnecting] = useState(false);
 
     const selectedNetwork = useMemo(() => NETWORKS[selectedNetworkKey] || DEFAULT_NETWORK, [selectedNetworkKey]);
-    const allowedNetworks = useMemo(() => [NETWORKS.ETHEREUM, NETWORKS.BASE, NETWORKS.POLYGON, NETWORKS.BNB], []);
+    const allowedNetworks = useMemo(() => [NETWORKS.ETHEREUM, NETWORKS.BASE, NETWORKS.POLYGON, NETWORKS.BNB, NETWORKS.ARBITRUM, NETWORKS.AVALANCHE], []);
 
     const networkRpcProvider = useMemo(() => {
         const rpcUrls = selectedNetwork?.rpcUrls;

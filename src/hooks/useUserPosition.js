@@ -16,7 +16,7 @@ export const useUserPosition = () => {
     const fetchTimeoutRef = useRef(null);
     const prevAddressRef = useRef(account);
 
-    const CACHE_TTL = 10000; // 10 seconds cache
+    const CACHE_TTL = 60000; // 60 seconds cache
     const DEBOUNCE_DELAY = 500; // 500ms debounce
 
     const refresh = useCallback(async (force = false) => {
