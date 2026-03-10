@@ -38,8 +38,10 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Upload via SFTP
-        uses: appleboy/scp-action@master
+      - name: Upload via SFTP (Attempt 1)
+        id: upload1
+        uses: appleboy/scp-action@v0.1.7
+        continue-on-error: true
         with:
           host: ${{ secrets.REMOTE_HOST }}
           username: ${{ secrets.REMOTE_USER }}
@@ -48,9 +50,41 @@ jobs:
           source: "dist/*"
           target: "${{ secrets.REMOTE_APP_ROOT }}/releases/${{ steps.version.outputs.tag }}"
           strip_components: 1
+          timeout: 60s
+          command_timeout: 5m
+
+      - name: Upload via SFTP (Attempt 2 - Retry)
+        if: steps.upload1.outcome == 'failure'
+        id: upload2
+        uses: appleboy/scp-action@v0.1.7
+        continue-on-error: true
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          port: ${{ secrets.REMOTE_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "dist/*"
+          target: "${{ secrets.REMOTE_APP_ROOT }}/releases/${{ steps.version.outputs.tag }}"
+          strip_components: 1
+          timeout: 60s
+          command_timeout: 10m
+
+      - name: Upload via SFTP (Attempt 3 - Last Try)
+        if: steps.upload2.outcome == 'failure'
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          port: ${{ secrets.REMOTE_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "dist/*"
+          target: "${{ secrets.REMOTE_APP_ROOT }}/releases/${{ steps.version.outputs.tag }}"
+          strip_components: 1
+          timeout: 120s
+          command_timeout: 15m
 
       - name: Atomic Symlink Swap
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.REMOTE_HOST }}
           username: ${{ secrets.REMOTE_USER }}
