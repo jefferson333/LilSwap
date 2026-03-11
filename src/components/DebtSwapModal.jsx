@@ -396,7 +396,7 @@ export const DebtSwapModal = ({
     const [swapAmount, setSwapAmount] = useState(BigInt(0));
     const [inputValue, setInputValue] = useState('');
     const [showSlippageSettings, setShowSlippageSettings] = useState(false);
-    const [activeTab, setActiveTab] = useState('market');
+    const [slippageInputValue, setSlippageInputValue] = useState('');
     const [invertRate, setInvertRate] = useState(false);
     const [showTransactionOverview, setShowTransactionOverview] = useState(false);
     // Preference: use permit (EIP-712 signature) by default — session only
@@ -497,6 +497,7 @@ export const DebtSwapModal = ({
             setInputValue('');
             setSwapAmount(BigInt(0));
             setShowSlippageSettings(false);
+            setSlippageInputValue('');
             setFreezeQuote(false);
         }
     }, [isOpen, initialFromToken, initialToToken, marketAssets]);
@@ -544,11 +545,13 @@ export const DebtSwapModal = ({
 
 
 
-    // Quote hook
     const {
         swapQuote,
         slippage,
         setSlippage,
+        isAutoSlippage,
+        setIsAutoSlippage,
+        recommendedSlippage,
         isQuoteLoading,
         isTyping,
         nextRefreshIn,
@@ -557,6 +560,7 @@ export const DebtSwapModal = ({
         resetRefreshCountdown,
         quoteError,
         setQuoteError,
+        priceImpact,
     } = useParaswapQuote({
         debtAmount: swapAmount,
         fromToken,
@@ -924,10 +928,15 @@ export const DebtSwapModal = ({
     }, [showMethodMenu]);
 
     // Close slippage popover when clicking outside
+    // Close slippage popover when clicking outside
     useEffect(() => {
         if (!showSlippageSettings) return;
         const handleClickOutside = (e) => {
-            if (slippageMenuRef.current && !slippageMenuRef.current.contains(e.target)) {
+            // Check if click is outside BOTH the menu AND the button that toggles it
+            const isMenuClick = slippageMenuRef.current && slippageMenuRef.current.contains(e.target);
+            const isButtonClick = e.target.closest('[data-slippage-toggle]');
+
+            if (!isMenuClick && !isButtonClick) {
                 setShowSlippageSettings(false);
             }
         };
@@ -978,120 +987,105 @@ export const DebtSwapModal = ({
     return (
         <Modal isOpen={isOpen} onClose={onClose} title={modalTitle} maxWidth="460px" headerBorder={false}>
             <div className="px-3 pb-3 pt-0 space-y-1.5">
-                {/* Header with Tabs and Slippage */}
+                {/* Header with Settings (Gear) Button - Tabs removed */}
                 <div className="flex items-center justify-between gap-2 relative">
-                    {/* Tabs: Market / Limit */}
-                    <div className="flex gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg flex-1">
+                    <div className="flex-1"></div>
+
+                    {/* Slippage Settings Gear Button & Label */}
+                    <div className={`flex items-center gap-1.5 transition-all ${!swapQuote ? 'opacity-50 grayscale pointer-events-none' : ''
+                        }`}>
+                        <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500 ml-1">
+                            {isAutoSlippage ? 'Auto Slippage' : 'Slippage'}
+                        </span>
                         <button
-                            onClick={() => setActiveTab('market')}
-                            className={`flex-1 py-1 text-sm font-bold rounded-md transition-all ${activeTab === 'market'
-                                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm'
-                                : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white'
+                            data-slippage-toggle="true"
+                            onClick={() => setShowSlippageSettings(!showSlippageSettings)}
+                            disabled={!swapQuote}
+                            className={`inline-flex items-center gap-1 text-[11px] font-bold transition-colors ${showSlippageSettings
+                                ? 'text-primary'
+                                : 'text-slate-900 dark:text-white hover:text-primary dark:hover:text-primary'
                                 }`}
+                            title="Slippage settings"
                         >
-                            Market
-                        </button>
-                        <button
-                            disabled
-                            aria-disabled="true"
-                            title="Limit orders coming soon"
-                            className={`flex-1 py-1 text-sm font-bold rounded-md transition-all opacity-60 cursor-not-allowed ${activeTab === 'limit'
-                                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white'
-                                : 'text-slate-500 dark:text-slate-400'
-                                }`}
-                        >
-                            <span>Limit</span>
-                            <span className="text-[10px] ml-1 opacity-60">Soon</span>
+                            <span>{(slippage / 100).toFixed(2)}%</span>
+                            <Settings className="w-3 h-3" />
                         </button>
                     </div>
 
-                    {/* Slippage Icon */}
-                    <button
-                        onClick={() => setShowSlippageSettings(!showSlippageSettings)}
-                        className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white"
-                        title={`Slippage: ${(slippage / 100).toFixed(2)}%`}
-                    >
-                        <Settings className="w-4 h-4" />
-                    </button>
-                </div>
+                    {/* Slippage Settings Popover */}
+                    {showSlippageSettings && (
+                        <div
+                            ref={slippageMenuRef}
+                            className="absolute top-10 right-0 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-3 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-top-2 duration-150 w-85"
+                        >
+                            <div className="flex items-center justify-between mb-2.5 px-0.5">
+                                <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Max slippage</span>
+                            </div>
 
-                {/* Slippage Settings Popover */}
-                {showSlippageSettings && (
-                    <div
-                        ref={slippageMenuRef}
-                        className="absolute top-16 right-4 bg-white dark:bg-slate-800 border border-border-light dark:border-slate-700 p-3 rounded-lg shadow-lg z-50 animate-in slide-in-from-top-2 duration-150 overflow-visible"
-                    >
-                        <div className="flex items-center justify-between mb-2">
-                            <label className="text-xs text-slate-500 dark:text-slate-400 uppercase font-bold">Slippage Tolerance</label>
-                            <span className="text-sm font-bold text-slate-900 dark:text-white">{(slippage / 100).toFixed(2)}%</span>
-                        </div>
-                        <div className="flex gap-2">
-                            {[10, 25, 50, 150, 500].map((val) => (
-                                <button
-                                    key={val}
-                                    onClick={() => {
-                                        setSlippage(val);
-                                        setShowSlippageSettings(false);
-                                    }}
-                                    className={`flex-1 px-3 py-2 text-xs font-bold rounded-lg transition-all ${slippage === val
-                                        ? 'bg-primary text-white'
-                                        : 'bg-slate-100 dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-                                        }`}
-                                >
-                                    {(val / 100).toFixed(2)}%
-                                </button>
-                            ))}
-                        </div>
-                        {isDev && (
-                            <>
-                                <div className="mt-3 flex items-center justify-between gap-3">
-                                    <label className="text-xs text-slate-400 uppercase font-bold">Freeze Quote</label>
+                            <div className="flex items-center gap-1 p-1 bg-slate-50 dark:bg-slate-900/50 rounded-xl">
+                                {[10, 50].map((val) => (
                                     <button
+                                        key={val}
                                         type="button"
-                                        onClick={() => setFreezeQuote((prev) => !prev)}
-                                        className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${freezeQuote
-                                            ? 'bg-emerald-600 text-white'
-                                            : 'bg-slate-900 text-slate-400 hover:bg-slate-700'
+                                        onClick={() => {
+                                            setIsAutoSlippage(false);
+                                            setSlippage(val);
+                                            setSlippageInputValue((val / 100).toString());
+                                        }}
+                                        className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all whitespace-nowrap ${slippage === val && !isAutoSlippage
+                                            ? 'bg-primary text-white shadow-sm'
+                                            : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-700 dark:hover:text-slate-200'
                                             }`}
                                     >
-                                        {freezeQuote ? 'On' : 'Off'}
+                                        {(val / 100).toFixed(2)}%
                                     </button>
-                                </div>
-                                <div className="mt-2 flex items-center justify-between">
-                                    <label className="text-xs text-slate-400 uppercase font-bold">Buffer</label>
-                                    <span className="text-sm font-bold text-white">{displayBufferPct}%</span>
-                                </div>
-                            </>
-                        )}
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsAutoSlippage(true);
+                                        setSlippageInputValue('');
+                                    }}
+                                    className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all whitespace-nowrap ${isAutoSlippage
+                                        ? 'bg-primary text-white shadow-sm'
+                                        : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/80 hover:text-slate-700 dark:hover:text-slate-200'
+                                        }`}
+                                >
+                                    Auto {recommendedSlippage > 0 ? `(${(recommendedSlippage / 100).toFixed(2)}%)` : ''}
+                                </button>
 
-                        {getLogLevel() === 'debug' && (
-                            <div className="mt-3">
-                                <label className="text-xs text-slate-400 uppercase font-bold">Developer</label>
+                                <div className="relative flex-1 min-w-20">
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        placeholder="Custom"
+                                        value={isAutoSlippage ? '' : slippageInputValue}
+                                        onChange={(e) => {
+                                            const normalized = normalizeDecimalInput(e.target.value);
+                                            setSlippageInputValue(normalized);
 
-                                <div className="mt-2 flex items-center gap-3">
-                                    <InfoTooltip message="This will also attempt to ask your wallet to forget site permissions/signatures (may disconnect). If your wallet still auto-approves, remove the site from your wallet's Connected/Trusted sites.">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                clearCachedPermit();
-                                                addLog?.('Cached permit signatures cleared', 'success');
-                                                addLog?.('Next swap will request a fresh permit signature', 'info');
-                                                logger.info('Cached permit signatures cleared via UI');
-                                            }}
-                                            className="px-3 py-1 text-xs font-bold rounded-md transition-all bg-slate-900 text-slate-400 hover:bg-slate-700"
-                                        >
-                                            Clear cached permits
-                                        </button>
-                                    </InfoTooltip>
-
-                                    {forceRequirePermit && (
-                                        <div className="text-xs text-amber-300 italic">Will require fresh signature (persisted)</div>
-                                    )}
+                                            if (normalized === '') {
+                                                setIsAutoSlippage(true);
+                                            } else {
+                                                setIsAutoSlippage(false);
+                                                // Convert normalized dot-separated string to bps
+                                                const numericVal = parseFloat(normalized);
+                                                if (!isNaN(numericVal)) {
+                                                    const bps = Math.max(0, Math.min(5000, Math.floor(numericVal * 100)));
+                                                    setSlippage(bps);
+                                                }
+                                            }
+                                        }}
+                                        className="w-full bg-white dark:bg-slate-900 border-none rounded-lg px-2 py-1.5 text-[11px] font-bold text-slate-900 dark:text-white pr-5 focus:outline-none placeholder:text-slate-400 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    />
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-bold">%</span>
                                 </div>
                             </div>
-                        )}
-                    </div>
-                )}
+                        </div>
+                    )}
+                </div>
+
+
 
                 {/* From Token Input Row */}
                 {fromToken && (
@@ -1153,55 +1147,6 @@ export const DebtSwapModal = ({
                     )}
                 </div>
 
-                {/* Safety Alerts */}
-                {(() => {
-                    const currentHf = parseFloat(summary?.healthFactor || '0');
-                    const currentTotalCollateralUSD = parseFloat(summary?.totalCollateralUSD) || 0;
-                    const currentLiquidationThreshold = parseFloat(summary?.currentLiquidationThreshold) || 0;
-                    const currentTotalBorrowsUSD = parseFloat(summary?.totalBorrowsUSD) || 0;
-
-                    let simulatedHf = currentHf;
-
-                    if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
-                        try {
-                            const reducedDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, fromToken.decimals || 18));
-                            const newDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
-
-                            const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
-                            const fromMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
-                            const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
-
-                            const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
-                            const toMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
-                            const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
-
-                            if (fromPrice > 0 && toPrice > 0) {
-                                const repaidDebtUsd = reducedDebtAmountF * fromPrice;
-                                const newDebtUsd = newDebtAmountF * toPrice;
-
-                                const newTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
-
-                                if (newTotalBorrowsUSD > 0) {
-                                    simulatedHf = (currentTotalCollateralUSD * currentLiquidationThreshold) / newTotalBorrowsUSD;
-                                } else {
-                                    simulatedHf = -1;
-                                }
-                            }
-                        } catch (e) { }
-                    }
-
-                    if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0) {
-                        return (
-                            <div className="mb-2 px-1">
-                                <div className="p-2 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 flex items-start gap-2 text-xs text-red-900 dark:text-red-100">
-                                    <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-500 shrink-0 mt-0.5" />
-                                    <p className="leading-snug">Liquidation Risk: This swap will leave your Health Factor very low ({simulatedHf === -1 ? '∞' : simulatedHf.toFixed(2)}). Aave may block the operation.</p>
-                                </div>
-                            </div>
-                        );
-                    }
-                    return null;
-                })()}
 
                 {/* To Token Row (Selector + Quote Result) */}
                 <div className="bg-slate-100 dark:bg-slate-800 border border-border-light dark:border-slate-700 rounded-xl p-1 px-2.5">
@@ -1737,6 +1682,85 @@ export const DebtSwapModal = ({
                     </div>
                 )}
 
+                {/* Safety Alerts Consolidated at Bottom */}
+                {(() => {
+                    if (!toToken || !marketAssets || !inputValue || !swapQuote) return null;
+
+                    const currentHf = parseFloat(summary?.healthFactor || '0');
+                    const currentTotalCollateralUSD = parseFloat(summary?.totalCollateralUSD) || 0;
+                    const currentLiquidationThreshold = parseFloat(summary?.currentLiquidationThreshold) || 0;
+                    const currentTotalBorrowsUSD = parseFloat(summary?.totalBorrowsUSD) || 0;
+                    let simulatedHf = currentHf;
+
+                    if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
+                        try {
+                            const reducedDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, fromToken.decimals || 18));
+                            const newDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
+                            const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
+                            const fromMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
+                            const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
+                            const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
+                            const toMarketToken = (marketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                            const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
+
+                            if (fromPrice > 0 && toPrice > 0) {
+                                const repaidDebtUsd = reducedDebtAmountF * fromPrice;
+                                const newDebtUsd = newDebtAmountF * toPrice;
+                                const newTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
+                                if (newTotalBorrowsUSD > 0) {
+                                    simulatedHf = (currentTotalCollateralUSD * currentLiquidationThreshold) / newTotalBorrowsUSD;
+                                } else {
+                                    simulatedHf = -1;
+                                }
+                            }
+                        } catch (e) { }
+                    }
+
+                    const alerts = [];
+                    // 1. Liquidation risk
+                    if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0) {
+                        alerts.push({
+                            label: 'Liquidation Risk:',
+                            message: `This swap will leave your Health Factor very low (${simulatedHf.toFixed(2)}).`,
+                            isDanger: true
+                        });
+                    }
+
+                    // 2. Price Impact warning
+                    if (priceImpact > 0.05) {
+                        alerts.push({
+                            label: 'High Impact:',
+                            message: `Price impact is very high (${(priceImpact * 100).toFixed(2)}%).`,
+                            isDanger: true
+                        });
+                    }
+
+                    // 3. Slippage/Revert warning (Combined)
+                    if (slippage < recommendedSlippage || priceImpact > 0.02) {
+                        alerts.push({
+                            label: 'Warning:',
+                            message: 'High risk of revert. Consider increasing slippage.',
+                            isDanger: true
+                        });
+                    }
+
+                    if (alerts.length === 0) return null;
+
+                    return (
+                        <div className="space-y-1 mb-2">
+                            {alerts.map((alert, i) => (
+                                <div key={i} className="flex justify-center gap-1.5 px-1">
+                                    <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">{alert.label}</span>
+                                    <div className={`flex items-center gap-1 text-[11px] font-bold ${alert.isDanger ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-500'}`}>
+                                        <span className="text-center">{alert.message}</span>
+                                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    );
+                })()}
+
                 {/* Method selector (always shown) */}
                 <div ref={methodMenuRef} className="relative flex justify-end mb-2">
                     <div className="flex items-center gap-1.5 text-xs">
@@ -1932,6 +1956,7 @@ export const DebtSwapModal = ({
                         </div>
                     </div>
                 )}
+
 
 
                 {/* Action Button */}
