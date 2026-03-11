@@ -38,30 +38,31 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
-      - name: Upload via SFTP
-        uses: appleboy/scp-action@master
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
         with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          port: ${{ secrets.REMOTE_PORT }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "dist/*"
-          target: "${{ secrets.REMOTE_APP_ROOT }}/releases/${{ steps.version.outputs.tag }}"
-          strip_components: 1
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add Remote to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Upload and Extract via Tar over SSH
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          ROOT="${{ secrets.REMOTE_APP_ROOT }}"
+          TARGET="$ROOT/releases/$TAG"
+          
+          # Create target directory and stream tar content
+          ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "mkdir -p $TARGET"
+          tar czf - -C dist . | ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "tar xzf - -C $TARGET"
 
       - name: Atomic Symlink Swap
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          port: ${{ secrets.REMOTE_PORT }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            ROOT="${{ secrets.REMOTE_APP_ROOT }}"
-            TAG="${{ steps.version.outputs.tag }}"
-
-            # Prepare the new symlink
-            ln -sfn $ROOT/releases/$TAG $ROOT/current
-
-            # Keep only the last 3 releases for storage efficiency
+        run: |
+          ROOT="${{ secrets.REMOTE_APP_ROOT }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "
+            ln -sfn $ROOT/releases/$TAG $ROOT/current &&
             cd $ROOT/releases && ls -1dt v* | tail -n +4 | xargs rm -rf
+          "

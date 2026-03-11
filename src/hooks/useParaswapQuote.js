@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ethers } from 'ethers';
 import { ADDRESSES } from '../constants/addresses.js';
 import { DEFAULT_NETWORK } from '../constants/networks.js';
@@ -26,8 +26,9 @@ export const useParaswapQuote = ({
     const [swapQuote, setSwapQuote] = useState(null);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
     const [nextRefreshIn, setNextRefreshIn] = useState(AUTO_REFRESH_SECONDS);
-    // slippage is expressed in basis points (bps) across the app: 25 = 0.25%
-    const [slippage, setSlippage] = useState(25);
+    // slippage is expressed in basis points (bps) across the app: 50 = 0.50%
+    const [slippage, setSlippage] = useState(50);
+    const [isAutoSlippage, setIsAutoSlippage] = useState(true);
     const [isQuoteLoading, setIsQuoteLoading] = useState(false);
     const [isTyping, setIsTyping] = useState(false);
     const [quoteError, setQuoteError] = useState(null);
@@ -159,6 +160,10 @@ export const useParaswapQuote = ({
                 }, signal);
 
                 const { priceRoute, destAmount, version, augustus, bufferBps, feeBps, discountPercent } = routeResult;
+                logger.debug('[useParaswapQuote] Collateral Quote Result:', {
+                    priceImpact: priceRoute?.priceImpact,
+                    priceRouteKeys: priceRoute ? Object.keys(priceRoute) : []
+                });
                 const quoteTimestamp = Math.floor(Date.now() / 1000);
 
                 const srcAmountBigInt = BigInt(srcAmount);
@@ -423,10 +428,43 @@ export const useParaswapQuote = ({
         return () => clearInterval(interval);
     }, [autoRefreshEnabled, fetchQuote, enabled, freezeQuote, isTabVisible, isUserActive]);
 
+    // Calculate price impact and recommended slippage
+    const { priceImpact, recommendedSlippage } = useMemo(() => {
+        if (!swapQuote || !swapQuote.priceRoute) return { priceImpact: 0, recommendedSlippage: 10 };
+
+        let impact = swapQuote.priceRoute.priceImpact || 0;
+
+        // Manual calculation if Field is missing (Velora SDK v6+)
+        if (impact === 0 && swapQuote.priceRoute.srcUSD && swapQuote.priceRoute.destUSD) {
+            const srcUSD = parseFloat(swapQuote.priceRoute.srcUSD);
+            const destUSD = parseFloat(swapQuote.priceRoute.destUSD);
+            if (srcUSD > 0) {
+                // Impact = (src - dest) / src
+                impact = Math.max(0, (srcUSD - destUSD) / srcUSD);
+            }
+        }
+
+        // Formula: max(10 bps, price impact + 10 bps buffer to prevent reverts)
+        const recSlippage = Math.max(10, Math.ceil(impact * 10000) + 10);
+        
+        return { priceImpact: impact, recommendedSlippage: recSlippage };
+    }, [swapQuote]);
+
+    // Sync slippage when quote updates if auto mode is on
+    useEffect(() => {
+        if (isAutoSlippage && swapQuote) {
+            setSlippage(recommendedSlippage);
+        }
+    }, [swapQuote, isAutoSlippage, recommendedSlippage]);
+
     return {
         swapQuote,
         slippage,
         setSlippage,
+        isAutoSlippage,
+        setIsAutoSlippage,
+        recommendedSlippage,
+        priceImpact,
         autoRefreshEnabled,
         nextRefreshIn,
         fetchQuote,

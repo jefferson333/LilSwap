@@ -1,0 +1,85 @@
+name: Rollback App (Frontend)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_tag:
+        description: 'Tag to rollback/restore to (e.g., v0.6.0)'
+        required: true
+        type: string
+
+jobs:
+  check-and-restore:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add Remote to Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Check if version exists on server
+        id: check_version
+        run: |
+          if ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "[ -d \"${{ secrets.REMOTE_APP_ROOT }}/releases/${{ github.event.inputs.target_tag }}\" ]"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout Code
+        if: steps.check_version.outputs.exists == 'false'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.target_tag }}
+
+      - name: Install pnpm
+        if: steps.check_version.outputs.exists == 'false'
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        if: steps.check_version.outputs.exists == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install Dependencies
+        if: steps.check_version.outputs.exists == 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        if: steps.check_version.outputs.exists == 'false'
+        env:
+          VITE_REOWN_PROJECT_ID: ${{ secrets.VITE_REOWN_PROJECT_ID }}
+        run: |
+          cp .env.example .env
+          sed -i "s/REOWN_PROJECT_ID_HERE/${VITE_REOWN_PROJECT_ID}/g" .env
+          pnpm build
+
+      - name: Upload and Extract (Restore Deploy)
+        if: steps.check_version.outputs.exists == 'false'
+        run: |
+          ROOT="${{ secrets.REMOTE_APP_ROOT }}"
+          TAG="${{ github.event.inputs.target_tag }}"
+          TARGET="$ROOT/releases/$TAG"
+          ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "mkdir -p $TARGET"
+          tar czf - -C dist . | ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "tar xzf - -C $TARGET"
+
+      - name: Atomic Symlink Swap
+        run: |
+          ROOT="${{ secrets.REMOTE_APP_ROOT }}"
+          TAG="${{ github.event.inputs.target_tag }}"
+          ssh -p ${{ secrets.REMOTE_PORT }} ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} "
+            if [ ! -d \"$ROOT/releases/$TAG\" ]; then
+              echo \"Error: Release $TAG not found even after attempt to deploy.\"
+              exit 1
+            fi
+            ln -sfn $ROOT/releases/$TAG $ROOT/current
+          "
