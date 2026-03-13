@@ -200,7 +200,7 @@ export default function App() {
                   </div>
                   <h2 className="text-2xl font-bold font-display text-slate-900 dark:text-white mb-4">Connect Wallet to Begin</h2>
                   <p className="text-slate-500 dark:text-slate-400 max-w-sm mx-auto mb-10 text-sm leading-relaxed">
-                    Manage your Aave V3 positions and swap between debt assets with optimal efficiency.
+                    Maximize your Aave V3 potential. Optimize your positions by swapping collateral or debt assets with seamless routing and maximum efficiency.
                   </p>
                   <button
                     onClick={handleConnect}
