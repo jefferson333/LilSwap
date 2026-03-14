@@ -4,8 +4,7 @@
  */
 
 import logger from '../utils/logger.js';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/v1';
+import { apiClient } from './api.js';
 
 /**
  * Updates backend with txHash after user sends to blockchain
@@ -16,24 +15,14 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/v1';
 export async function recordTransactionHash(transactionId, txHash) {
     try {
         logger.debug('[Transactions] Sending hash to backend', { transactionId, txHash });
-        const response = await fetch(`${API_URL}/transactions/${transactionId}/send-hash`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ txHash }),
-        });
-
-        if (!response.ok) {
-            const text = await response.text().catch(() => '');
-            logger.warn('[Transactions] Failed to record hash:', response.status, text);
-            return false;
-        }
+        const response = await apiClient.post(`/transactions/${transactionId}/send-hash`, { txHash });
 
         logger.debug('[Transactions] Hash recorded:', { id: transactionId, hash: txHash?.slice(0, 8) });
         return true;
     } catch (error) {
-        logger.warn('[Transactions] Error recording hash:', error.message);
+        const data = error.response?.data;
+        const status = error.response?.status;
+        logger.warn('[Transactions] Error recording hash:', status, data || error.message);
         return false;
     }
 }
@@ -60,23 +49,12 @@ export async function confirmTransactionOnChain(transactionId, confirmData) {
             txFee: confirmData.txFee || null
         };
 
-        const response = await fetch(`${API_URL}/transactions/${transactionId}/confirm`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(payload),
-        });
-
-        if (!response.ok) {
-            logger.warn('[Transactions] Failed to confirm:', response.status);
-            return false;
-        }
+        await apiClient.post(`/transactions/${transactionId}/confirm`, payload);
 
         logger.debug('[Transactions] Confirmed:', { id: transactionId });
         return true;
     } catch (error) {
-        logger.warn('[Transactions] Error confirming:', error.message);
+        logger.warn('[Transactions] Error confirming:', error.response?.status || error.message);
         return false;
     }
 }
@@ -89,20 +67,12 @@ export async function confirmTransactionOnChain(transactionId, confirmData) {
  */
 export async function getUserTransactionHistory(walletAddress, limit = 50) {
     try {
-        const response = await fetch(
-            `${API_URL}/transactions/user/${walletAddress}?limit=${limit}`,
-            { headers: { 'Content-Type': 'application/json' } }
-        );
-
-        if (!response.ok) {
-            logger.warn('[Transactions] Failed to fetch history:', response.status);
-            return [];
-        }
-
-        const data = await response.json();
-        return data.transactions || [];
+        const response = await apiClient.get(`/transactions/user/${walletAddress}`, {
+            params: { limit }
+        });
+        return response.data.transactions || [];
     } catch (error) {
-        logger.warn('[Transactions] Error fetching history:', error.message);
+        logger.warn('[Transactions] Error fetching history:', error.response?.status || error.message);
         return [];
     }
 }
@@ -113,20 +83,10 @@ export async function getUserTransactionHistory(walletAddress, limit = 50) {
  */
 export async function rejectTransaction(transactionId, reason) {
     try {
-        const url = `${API_URL}/transactions/${transactionId}/reject`;
-        logger.debug('[Transactions API] calling reject', { url, reason });
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason })
-        });
-        if (!res.ok) {
-            const text = await res.text().catch(() => '');
-            logger.warn('[Transactions API] reject request failed', { status: res.status, body: text });
-        }
-        return res.ok;
+        await apiClient.post(`/transactions/${transactionId}/reject`, { reason });
+        return true;
     } catch (err) {
-        logger.warn('[Transactions] reject failure', err.message);
+        logger.warn('[Transactions] reject failure', err.response?.status || err.message);
         return false;
     }
 }
@@ -136,14 +96,10 @@ export async function rejectTransaction(transactionId, reason) {
  */
 export async function failTransaction(transactionId, reason) {
     try {
-        const res = await fetch(`${API_URL}/transactions/${transactionId}/fail`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason })
-        });
-        return res.ok;
+        await apiClient.post(`/transactions/${transactionId}/fail`, { reason });
+        return true;
     } catch (err) {
-        logger.warn('[Transactions] fail failure', err.message);
+        logger.warn('[Transactions] fail failure', err.response?.status || err.message);
         return false;
     }
 }

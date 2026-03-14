@@ -1,20 +1,42 @@
 import axios from 'axios';
+import { ethers } from 'ethers';
 import logger from '../utils/logger';
 import { notifyApiVersion, notifyApiStatus } from '../context/ApiMetaContext.jsx';
 
 // Axios instance configured for the backend
-// Uses VITE_API_URL from environment files (.env.development or .env.production)
 export const apiClient = axios.create({
     baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3001/v1',
     headers: {
         'Content-Type': 'application/json',
     },
-    timeout: 45000, // 45s timeout to allow for retries
+    timeout: 45000,
 });
 
-// Add request interceptor for logging
+// Add request interceptor for logging and security signing
 apiClient.interceptors.request.use(
     (config) => {
+        // Sign the request with internal shared secret if available
+        const secret = import.meta.env.VITE_INTERNAL_API_KEY;
+        if (secret) {
+            const timestamp = Date.now().toString();
+            const hasBody = config.data && Object.keys(config.data).length > 0;
+            const bodyString = hasBody ? JSON.stringify(config.data) : '';
+            
+            try {
+                // Ethers v6 syntax: ethers.computeHmac, ethers.toUtf8Bytes, ethers.hexlify
+                const signature = ethers.computeHmac(
+                    'sha256',
+                    ethers.hexlify(ethers.toUtf8Bytes(secret)),
+                    ethers.toUtf8Bytes(timestamp + bodyString)
+                );
+                
+                config.headers['X-Internal-Signature'] = signature;
+                config.headers['X-Internal-Timestamp'] = timestamp;
+            } catch (err) {
+                logger.error('Failed to sign API request', err);
+            }
+        }
+
         logger.api(config.method?.toUpperCase() || 'REQUEST', config.url, config.data);
         return config;
     },
@@ -71,7 +93,8 @@ apiClient.interceptors.response.use(
             url: config?.url,
             method: config?.method,
             status: error.response?.status,
-            message: error.message
+            message: error.message,
+            data: error.response?.data
         });
 
         // If it's a network error or 5xx error, mark API as down
