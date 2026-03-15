@@ -1,6 +1,4 @@
 import axios from 'axios';
-
-
 import logger from '../utils/logger';
 import { notifyApiVersion, notifyApiStatus } from '../context/ApiMetaContext.jsx';
 import { logSessionService } from './logSessionService';
@@ -14,131 +12,48 @@ export const apiClient = axios.create({
     timeout: 45000,
 });
 
-// Internal state management
-let currentSession = {
-    sessionId: null,
-    signatureKey: null,
-    expiry: 0,
-    isInitializing: false,
-    isPending: true,
-    initPromise: null,
-    _resolvePending: null,
-    _performFetch: null
-};
-
 // Event labels
 export const SESSION_EXPIRED_EVENT = 'lilswap:session_expired';
 
 /**
- * Returns current state snapshots (read-only)
- */
-export const getSessionData = () => ({ ...currentSession });
-
-/**
- * Synchronizes internal state with the backend.
- * @returns {Promise<Object>} State data
+ * Placeholder for compatibility
  */
 export const syncInternalState = async () => {
-    if (currentSession.sessionId) {
-        return currentSession;
-    }
+    return { status: 'static' };
+};
 
-    if (currentSession.isInitializing) {
-        return currentSession.initPromise;
-    }
-
-    currentSession.isInitializing = true;
-    currentSession.isPending = false;
-    
-    currentSession.initPromise = (async () => {
-        let worker;
-        try {
-            logger.debug('[Auth] S1');
-            const res = await apiClient.get('/auth/init', {
-                _skipAuthInterceptor: true
-            });
-            const { c, d } = res.data;
-
-            logger.debug('[Auth] S2', { d });
-            
-            const n = await new Promise((resolve, reject) => {
-                worker = new Worker(new URL('./integrityWorker.js', import.meta.url), { type: 'module' });
-                
-                worker.onmessage = (e) => {
-                    if (e.data.error) reject(new Error(e.data.error));
-                    else resolve(e.data.n);
-                };
-                
-                worker.onerror = (err) => reject(err);
-                
-                worker.postMessage({ c, d });
-            });
-
-            logger.debug('[Auth] S3');
-
-            const response = await apiClient.post('/auth/verify', { c, n }, { 
-                _skipAuthInterceptor: true 
-            });
-
-            currentSession = {
-                ...currentSession,
-                sessionId: response.data.sessionId,
-                signatureKey: response.data.signatureKey,
-                expiry: response.data.expiry,
-                isInitializing: false,
-                isPending: false,
-                initPromise: null,
-                _resolvePending: null,
-                _performFetch: null
-            };
-
-            logSessionService.setSession(
-                currentSession.sessionId, 
-                currentSession.signatureKey, 
-                currentSession.expiry
-            );
-
-            return currentSession;
-        } catch (error) {
-            logger.error('[Auth] State sync failed', error.message || error);
-            currentSession.isInitializing = false;
-            currentSession.initPromise = null;
-            throw error;
-        } finally {
-            if (worker) worker.terminate();
-        }
-    })();
-
-    return currentSession.initPromise;
+/**
+ * Placeholder for compatibility
+ */
+export const revalidateSession = async () => {
+    return { status: 'static' };
 };
 
 // Add request interceptor for logging and security signing
 apiClient.interceptors.request.use(
     async (config) => {
-        // Skip auth for internal init or if explicitly requested
-        if (config._skipAuthInterceptor || config.url === '/auth/session') {
-            return config;
+        // Force HTTPS in production if baseURL is using HTTP
+        if (window.location.protocol === 'https:' && config.baseURL.startsWith('http:')) {
+            config.baseURL = config.baseURL.replace('http:', 'https:');
         }
 
-        // Wait for session initialization if it's currently in progress
-        if ((currentSession.isInitializing || currentSession.isPending) && currentSession.initPromise) {
-            try {
-                await currentSession.initPromise;
-            } catch (err) {
-                // If init fails, we proceed and let the regular auth fail if needed
-            }
-        }
-
-        // Use dynamic session signing if available
-        if (currentSession.sessionId && currentSession.signatureKey) {
+        // Use static secret from environment
+        const secret = import.meta.env.VITE_API_SECRET;
+        
+        if (secret) {
             const timestamp = Date.now().toString();
 
-            // Handle both fresh (object) and retried (already serialized string) config.data
+            // Ensure bodyString matches server-side logic exactly
             let bodyString = '';
             if (config.data) {
-                bodyString = typeof config.data === 'string'
-                    ? config.data
-                    : JSON.stringify(config.data);
+                if (typeof config.data === 'string') {
+                    // If it's already a string (Axios serialized it), check if it's an empty object string
+                    bodyString = (config.data === '{}') ? '' : config.data;
+                } else if (Object.keys(config.data).length > 0) {
+                    // If it's an object with keys, serialize it
+                    bodyString = JSON.stringify(config.data);
+                }
+                // If it's {}, bodyString remains ''
             }
             
             try {
@@ -146,7 +61,7 @@ apiClient.interceptors.request.use(
                 const enc = new TextEncoder();
                 const keyMaterial = await crypto.subtle.importKey(
                     'raw',
-                    enc.encode(currentSession.signatureKey),
+                    enc.encode(secret),
                     { name: 'HMAC', hash: 'SHA-256' },
                     false,
                     ['sign']
@@ -160,14 +75,13 @@ apiClient.interceptors.request.use(
                     .map(b => b.toString(16).padStart(2, '0'))
                     .join('');
                 
+                // Set headers using normalized names
                 config.headers['X-Internal-Signature'] = signature;
                 config.headers['X-Internal-Timestamp'] = timestamp;
-                config.headers['X-Session-Id'] = currentSession.sessionId;
             } catch (err) {
                 // Fail silently
             }
         }
-
 
         logger.api(config.method?.toUpperCase() || 'REQUEST', config.url, config.data);
         return config;
@@ -216,33 +130,6 @@ apiClient.interceptors.response.use(
 
         if (error.code === 'ERR_CANCELED' || error.name === 'CanceledError' || error.name === 'AbortError' || error.message === 'canceled') {
             return Promise.reject(error);
-        }
-
-        if (error.response?.status === 401 && !config._skipAuthInterceptor && !config._retryAfterSync) {
-            // Clear expired session
-            currentSession = {
-                sessionId: null,
-                signatureKey: null,
-                expiry: 0,
-                isInitializing: false,
-                isPending: false,
-                initPromise: null,
-                _resolvePending: null,
-                _performFetch: null
-            };
-            logSessionService.setSession(null, null, 0);
-
-            try {
-                // Re-initialize session silently (user won't see any loading screen)
-                await syncInternalState();
-                // Retry original request once with updated session headers
-                config._retryAfterSync = true;
-                return apiClient(config);
-            } catch (syncError) {
-                // If re-initialization also fails, notify the UI
-                window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
-                return Promise.reject(syncError);
-            }
         }
 
         logger.error('API Request Failed', {
@@ -346,4 +233,6 @@ export default {
     getCollateralQuote,
     buildCollateralSwapTx,
     getUserPosition,
+    revalidateSession,
+    syncInternalState
 };

@@ -17,17 +17,27 @@ export default defineConfig(({ mode }) => ({
     assetsDir: 'assets',
     emptyOutDir: true,
     minify: 'terser',
+    chunkSizeWarningLimit: 1000,
     terserOptions: {
       compress: {
         drop_debugger: true,
       },
     },
     rollupOptions: {
+      onwarn(warning, warn) {
+        // Suppress "/*#__PURE__*/" annotation warnings from node_modules
+        if (warning.code === 'INVALID_ANNOTATION' && warning.message.includes('/*#__PURE__*/')) {
+          return;
+        }
+        warn(warning);
+      },
       output: {
         manualChunks: {
-          ethers: ['ethers'],
-          aave: ['@bgd-labs/aave-address-book'],
-          vendor: ['axios', 'lucide-react', 'react', 'react-dom'],
+          'ethers-core': ['ethers'],
+          'wallet-libs': ['@reown/appkit', '@reown/appkit-adapter-ethers'],
+          'aave-discovery': ['@bgd-labs/aave-address-book'],
+          'ui-vendor': ['lucide-react', 'react', 'react-dom', 'framer-motion'],
+          axios: ['axios'],
         },
       },
     },

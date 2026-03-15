@@ -6,7 +6,6 @@ import { useToast } from './context/ToastContext.jsx';
 import { ApiMetaProvider } from './context/ApiMetaContext.jsx';
 import { UserActivityProvider } from './context/UserActivityContext.jsx';
 import AppFooter from './components/AppFooter.jsx';
-import { syncInternalState } from './services/api.js';
 
 // Lazy load Dashboard
 const Dashboard = lazy(() => import('./components/Dashboard.jsx').then(module => ({ default: module.Dashboard })));
@@ -73,12 +72,7 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Initialize internal state on startup
-  useEffect(() => {
-    syncInternalState().catch(err => {
-      console.error('State sync failed', err);
-    });
-  }, []);
+  // No initial session sync needed in static mode
 
 
 
