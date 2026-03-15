@@ -2,6 +2,7 @@ import axios from 'axios';
 import { ethers } from 'ethers';
 import logger from '../utils/logger';
 import { notifyApiVersion, notifyApiStatus } from '../context/ApiMetaContext.jsx';
+import { logSessionService } from './logSessionService';
 
 // Axios instance configured for the backend
 export const apiClient = axios.create({
@@ -12,28 +13,97 @@ export const apiClient = axios.create({
     timeout: 45000,
 });
 
+// Session state (In-memory only for security)
+let currentSession = {
+    sessionId: null,
+    signatureKey: null,
+    expiry: 0,
+    isInitializing: false,
+    initPromise: null
+};
+
+// Event labels
+export const SESSION_EXPIRED_EVENT = 'lilswap:session_expired';
+
+/**
+ * Returns current session snapshots (read-only)
+ */
+export const getSessionData = () => ({ ...currentSession });
+
+/**
+ * Initializes a secure session with the backend using Turnstile
+ * @param {string} turnstileToken - Token from CF Turnstile widget
+ * @returns {Promise<Object>} Session data
+ */
+export const initializeSecureSession = async (turnstileToken = null) => {
+    // If already initializing, return the existing promise
+    if (currentSession.isInitializing) return currentSession.initPromise;
+
+    currentSession.isInitializing = true;
+    currentSession.initPromise = (async () => {
+        try {
+            // In dev mode without keys, we can skip token if backend allows
+            const response = await apiClient.post('/auth/session', { 
+                turnstileToken,
+                // Dev hint for backend to allow bypass if configured
+                isDev: import.meta.env.DEV 
+            }, { 
+                // Don't use the interceptor for the auth call to avoid recursion
+                _skipAuthInterceptor: true 
+            });
+
+            currentSession = {
+                sessionId: response.data.sessionId,
+                signatureKey: response.data.signatureKey,
+                expiry: response.data.expiry,
+                isInitializing: false,
+                initPromise: null
+            };
+
+            // Propagate session to logSessionService
+            logSessionService.setSession(
+                currentSession.sessionId, 
+                currentSession.signatureKey, 
+                currentSession.expiry
+            );
+
+            return currentSession;
+        } catch (error) {
+            currentSession.isInitializing = false;
+            currentSession.initPromise = null;
+            throw error;
+        }
+    })();
+
+    return currentSession.initPromise;
+};
+
 // Add request interceptor for logging and security signing
 apiClient.interceptors.request.use(
-    (config) => {
-        // Sign the request with internal shared secret if available
-        const secret = import.meta.env.VITE_INTERNAL_API_KEY;
-        if (secret) {
+    async (config) => {
+        // Skip auth for internal handshake or if explicitly requested
+        if (config._skipAuthInterceptor || config.url === '/auth/session') {
+            return config;
+        }
+
+        // Use dynamic session signing if available
+        if (currentSession.sessionId && currentSession.signatureKey) {
             const timestamp = Date.now().toString();
             const hasBody = config.data && Object.keys(config.data).length > 0;
             const bodyString = hasBody ? JSON.stringify(config.data) : '';
             
             try {
-                // Ethers v6 syntax: ethers.computeHmac, ethers.toUtf8Bytes, ethers.hexlify
                 const signature = ethers.computeHmac(
                     'sha256',
-                    ethers.hexlify(ethers.toUtf8Bytes(secret)),
+                    ethers.hexlify(ethers.toUtf8Bytes(currentSession.signatureKey)),
                     ethers.toUtf8Bytes(timestamp + bodyString)
                 );
                 
                 config.headers['X-Internal-Signature'] = signature;
                 config.headers['X-Internal-Timestamp'] = timestamp;
+                config.headers['X-Session-Id'] = currentSession.sessionId;
             } catch (err) {
-                logger.error('Failed to sign API request', err);
+                // Fail silently
             }
         }
 
@@ -89,12 +159,29 @@ apiClient.interceptors.response.use(
             return Promise.reject(error);
         }
 
+        // Detect session expiry (401 Unauthorized with an existing session)
+        if (error.response?.status === 401 && currentSession.sessionId && !config._skipAuthInterceptor) {
+            
+            // Clear current session
+            currentSession = {
+                sessionId: null,
+                signatureKey: null,
+                expiry: 0,
+                isInitializing: false,
+                initPromise: null
+            };
+
+            // Reset log service
+            logSessionService.setSession(null, null, 0);
+
+            // Broadcast event for UI to react (e.g., TurnstileGuard)
+            window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+        }
+
         logger.error('API Request Failed', {
             url: config?.url,
             method: config?.method,
-            status: error.response?.status,
-            message: error.message,
-            data: error.response?.data
+            status: error.response?.status
         });
 
         // If it's a network error or 5xx error, mark API as down
