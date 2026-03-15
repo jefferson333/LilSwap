@@ -9,7 +9,7 @@ const UserActivityContext = createContext({
 /**
  * inactivityThreshold: Time in ms before a user is considered inactive (default 5 mins)
  */
-export const UserActivityProvider = ({ children, inactivityThreshold = 300000 }) => {
+export const UserActivityProvider = ({ children, inactivityThreshold = 1800000 }) => {
     const [isTabVisible, setIsTabVisible] = useState(true);
     const [isUserActive, setIsUserActive] = useState(true);
     const [lastActivity, setLastActivity] = useState(Date.now());

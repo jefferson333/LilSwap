@@ -7,18 +7,15 @@ import { ethers } from 'ethers';
  */
 class LogSessionService {
     constructor() {
-        this.sessionId = null;
-        this.signatureKey = null;
-        this.expiry = null;
+        this.secret = import.meta.env.VITE_API_SECRET || '';
     }
 
     /**
-     * Updates the session details. Called by api.js when a session is established.
+     * Updates the secret if needed. Usually static in this simple model.
      */
     setSession(sessionId, signatureKey, expiry) {
-        this.sessionId = sessionId;
-        this.signatureKey = signatureKey;
-        this.expiry = expiry;
+        // No longer using dynamic session keys, but keeping signature for compatibility if needed elsewhere
+        if (signatureKey) this.secret = signatureKey;
     }
 
     /**
@@ -27,8 +24,8 @@ class LogSessionService {
      * @returns {Object|null} { signature, timestamp, sessionId } or null if no session
      */
     async signPayload(body) {
-        // If no session is active, we can't sign logs securely
-        if (!this.sessionId || !this.signatureKey) {
+        const secret = this.secret || import.meta.env.VITE_API_SECRET;
+        if (!secret) {
             return null;
         }
 
@@ -39,14 +36,13 @@ class LogSessionService {
             // Compute HMAC using ethers
             const signature = ethers.computeHmac(
                 'sha256',
-                ethers.hexlify(ethers.toUtf8Bytes(this.signatureKey)),
+                ethers.hexlify(ethers.toUtf8Bytes(secret)),
                 ethers.toUtf8Bytes(timestamp + bodyString)
             );
 
             return {
                 signature,
-                timestamp,
-                sessionId: this.sessionId
+                timestamp
             };
         } catch (err) {
             console.error('[LogSession] Signing error:', err);
@@ -55,9 +51,7 @@ class LogSessionService {
     }
 
     reset() {
-        this.sessionId = null;
-        this.signatureKey = null;
-        this.expiry = null;
+        // No-op in static mode
     }
 }
 
