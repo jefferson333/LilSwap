@@ -55,7 +55,7 @@ export const useAllPositions = (walletAddress, opts = {}) => {
         }
     }, [walletAddress]);
 
-    // Initial fetch and setup auto-refresh
+    // Initial fetch when wallet changes
     useEffect(() => {
         if (!walletAddress) {
             setData(null);
@@ -64,15 +64,18 @@ export const useAllPositions = (walletAddress, opts = {}) => {
         }
 
         // Only clear previous data if the actual wallet address changed
-        // This prevents network switches from triggering the loading animation
         if (prevAddressRef.current !== walletAddress) {
             setData(null);
             prevAddressRef.current = walletAddress;
         }
 
         fetchPositions();
+    }, [fetchPositions, walletAddress]);
 
-        // Auto refresh every 90s (configurable)
+    // Auto refresh every 90s (configurable)
+    useEffect(() => {
+        if (!walletAddress) return;
+        
         const refreshInterval = opts.refreshIntervalMs || 90000;
         const interval = setInterval(() => {
             if (isTabVisible && isUserActive) {
@@ -87,14 +90,19 @@ export const useAllPositions = (walletAddress, opts = {}) => {
 
     // Trigger refresh when user becomes active/tab visible if data is stale (> refreshInterval)
     useEffect(() => {
-        if (isTabVisible && isUserActive) {
+        if (isTabVisible && isUserActive && lastFetch) {
             const refreshInterval = opts.refreshIntervalMs || 90000;
-            // Check if lastFetch exists and if time elapsed is greater than the refresh interval
-            if (lastFetch && (Date.now() - lastFetch > refreshInterval)) {
-                logger.debug('User returned and data is stale, refreshing...');
+            const timeSinceLastFetch = Date.now() - lastFetch;
+            
+            if (timeSinceLastFetch > refreshInterval) {
+                logger.debug('User returned and data is stale, refreshing...', { 
+                    elapsed: Math.round(timeSinceLastFetch / 1000) + 's' 
+                });
                 fetchPositions();
-            } else if (lastFetch) {
-                logger.debug('User returned but data is fresh, skipping refresh');
+            } else {
+                logger.debug('User returned but data is fresh, skipping refresh', { 
+                    elapsed: Math.round(timeSinceLastFetch / 1000) + 's' 
+                });
             }
         }
     }, [isTabVisible, isUserActive, lastFetch, fetchPositions, opts.refreshIntervalMs]);

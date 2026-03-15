@@ -6,6 +6,7 @@ import { useToast } from './context/ToastContext.jsx';
 import { ApiMetaProvider } from './context/ApiMetaContext.jsx';
 import { UserActivityProvider } from './context/UserActivityContext.jsx';
 import AppFooter from './components/AppFooter.jsx';
+import TurnstileGuard from './components/TurnstileGuard.jsx';
 
 // Lazy load Dashboard
 const Dashboard = lazy(() => import('./components/Dashboard.jsx').then(module => ({ default: module.Dashboard })));
@@ -36,11 +37,10 @@ export default function App() {
   } = useWeb3();
   const { addToast } = useToast();
 
-  // --- THEME STATE (Dark by default, persisted) ---
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    const saved = localStorage.getItem('lilswap_theme');
-    return saved !== null ? saved === 'dark' : true;
-  });
+  // --- THEME STATE (Source of truth is initial class set in index.html) ---
+  const [isDarkMode, setIsDarkMode] = useState(() => 
+    document.documentElement.classList.contains('dark')
+  );
 
   useEffect(() => {
     if (isDarkMode) {
@@ -96,6 +96,7 @@ export default function App() {
   return (
     <UserActivityProvider>
       <ApiMetaProvider>
+        <TurnstileGuard>
         <div className="min-h-screen bg-background-light dark:bg-background-dark text-slate-800 dark:text-slate-100 selection:bg-primary/30">
 
           {/* HEADER */}
@@ -235,6 +236,7 @@ export default function App() {
           <AppFooter />
 
         </div>
+        </TurnstileGuard>
       </ApiMetaProvider>
     </UserActivityProvider>
   );
