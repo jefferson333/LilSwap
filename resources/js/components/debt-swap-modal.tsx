@@ -24,6 +24,7 @@ import { getPairStatus, checkPairSwappable } from '../services/token-pair-cache'
 import { mapErrorToUserFriendly } from '../utils/error-mapping';
 import { getTokenLogo, onTokenImgError } from '../utils/get-token-logo';
 import { normalizeDecimalInput } from '../utils/normalize-decimal-input';
+import { saveTokenSelection, getSavedTokenSelection } from '../utils/token-selection-memory';
 import { CompactAmountInput } from './compact-amount-input';
 import { InfoTooltip } from './info-tooltip';
 import { Modal } from './modal';
@@ -339,32 +340,45 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             if (initialToToken) {
                 setToToken(initialToToken);
             } else if (localMarketAssets && localMarketAssets.length > 0) {
-                // Pick a default (e.g. USDT or USDC)
                 const fromAddr = (initialFromToken?.address || initialFromToken?.underlyingAsset || '').toLowerCase();
-                const defaultTo = localMarketAssets.find(m => {
-                    const addr = (m.address || m.underlyingAsset || '').toLowerCase();
+                
+                // Helper to check if a token is a good default candidate
+                const isGoodDefault = (token: any) => {
+                    const addr = (token.address || token.underlyingAsset || '').toLowerCase();
+                    if (addr === fromAddr) return false;
+                    
+                    const status = getBorrowStatus(token);
+                    return status.borrowable;
+                };
 
-                    if (addr === fromAddr) {
-                        return false;
+                // 1. Try saved selection for this network
+                const savedAddr = getSavedTokenSelection(effectiveNetwork?.chainId || 0, 'debt');
+                const savedMatch = savedAddr ? localMarketAssets.find(m => (m.address || m.underlyingAsset || '').toLowerCase() === savedAddr) : null;
+                
+                if (savedMatch && isGoodDefault(savedMatch)) {
+                    setToToken(savedMatch);
+                } else {
+                    // 2. Pick the FIRST eligible token from the list (no stable preference)
+                    const defaultTo = localMarketAssets.find(isGoodDefault);
+
+                    if (defaultTo) {
+                        setToToken(defaultTo);
                     }
-
-                    return m.symbol === 'USDT' || m.symbol === 'USDC';
-                }) || localMarketAssets.find(m => (m.address || m.underlyingAsset || '').toLowerCase() !== fromAddr);
-
-                if (defaultTo) {
-                    setToToken(defaultTo);
                 }
             }
         }
     }, [isOpen, initialFromToken, initialToToken, localMarketAssets]);
 
-    // Reset pair validation state when fromToken changes
-    const fromTokenAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
-
     useEffect(() => {
-        setSwappableTokens({});
-        validatingPairsRef.current.clear();
-    }, [fromTokenAddr]);
+        if (isOpen && toToken && effectiveNetwork?.chainId) {
+            const addr = (toToken.address || toToken.underlyingAsset || '').toLowerCase();
+            if (addr) {
+                saveTokenSelection(effectiveNetwork.chainId, 'debt', addr);
+            }
+        }
+    }, [toToken, isOpen, effectiveNetwork?.chainId]);
+
+    // Reset pair validation state when fromToken changes
 
     // Handle token changes
     useEffect(() => {

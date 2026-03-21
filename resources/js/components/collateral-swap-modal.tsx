@@ -26,6 +26,7 @@ import { mapErrorToUserFriendly } from '../utils/error-mapping';
 import { getTokenLogo, onTokenImgError } from '../utils/get-token-logo';
 import logger from '../utils/logger';
 import { normalizeDecimalInput } from '../utils/normalize-decimal-input';
+import { saveTokenSelection, getSavedTokenSelection } from '../utils/token-selection-memory';
 import { CompactAmountInput } from './compact-amount-input';
 import { InfoTooltip } from './info-tooltip';
 import { Modal } from './modal';
@@ -401,32 +402,44 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
             if (initialToToken) {
                 setToToken(initialToToken);
             } else if (localMarketAssets && localMarketAssets.length > 0) {
-                // If no toToken, pick a default (e.g. USDT or USDC)
                 const fromAddr = (initialFromToken?.address || initialFromToken?.underlyingAsset || '').toLowerCase();
-                const defaultTo = localMarketAssets.find(m => {
-                    const addr = (m.address || m.underlyingAsset || '').toLowerCase();
+                
+                const isGoodDefault = (token: any) => {
+                    const addr = (token.address || token.underlyingAsset || '').toLowerCase();
+                    if (addr === fromAddr) return false;
+                    
+                    // Basic health check for collateral swap destination
+                    return !token.isFrozen && !token.isPaused && token.isActive !== false;
+                };
 
-                    if (addr === fromAddr) {
-                        return false;
+                // 1. Try saved selection for this network
+                const savedAddr = getSavedTokenSelection(selectedNetwork?.chainId || 0, 'collateral');
+                const savedMatch = savedAddr ? localMarketAssets.find(m => (m.address || m.underlyingAsset || '').toLowerCase() === savedAddr) : null;
+                
+                if (savedMatch && isGoodDefault(savedMatch)) {
+                    setToToken(savedMatch);
+                } else {
+                    // 2. Pick the FIRST eligible token from the list (no stable preference)
+                    const defaultTo = localMarketAssets.find(isGoodDefault);
+
+                    if (defaultTo) {
+                        setToToken(defaultTo);
                     }
-
-                    return m.symbol === 'USDT' || m.symbol === 'USDC';
-                }) || localMarketAssets.find(m => (m.address || m.underlyingAsset || '').toLowerCase() !== fromAddr);
-
-                if (defaultTo) {
-                    setToToken(defaultTo);
                 }
             }
         }
     }, [isOpen, initialFromToken, initialToToken, localMarketAssets]);
 
-    // Reset pair validation state when fromToken changes
-    const fromTokenAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
-
     useEffect(() => {
-        setSwappableTokens({});
-        validatingPairsRef.current.clear();
-    }, [fromTokenAddr]);
+        if (isOpen && toToken && selectedNetwork?.chainId) {
+            const addr = (toToken.address || toToken.underlyingAsset || '').toLowerCase();
+            if (addr) {
+                saveTokenSelection(selectedNetwork.chainId, 'collateral', addr);
+            }
+        }
+    }, [toToken, isOpen, selectedNetwork?.chainId]);
+
+    // Reset pair validation state when fromToken changes
 
     // Reset when modal closes
     useEffect(() => {
