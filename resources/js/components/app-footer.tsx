@@ -15,7 +15,7 @@ const AppFooter: React.FC = () => {
         <footer className="sticky bottom-0 z-40 border-t border-border-light dark:border-border-dark bg-background-light/95 dark:bg-background-dark/95 backdrop-blur-sm">
             <div className="max-w-4xl mx-auto px-4 sm:px-6 py-2.5 flex flex-col items-center gap-2 text-[11px] text-slate-500 dark:text-slate-500">
                 <div className="flex items-center gap-3 flex-wrap justify-center">
-                    <span className="font-mono">v{APP_VERSION}</span>
+                    <span className="font-mono text-slate-400">v{APP_VERSION}</span>
 
                     {apiVersion && (
                         <>

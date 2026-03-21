@@ -1046,7 +1046,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                 <div className="flex justify-between items-start text-[13px] text-slate-600 dark:text-slate-300 font-medium">
                                     <div className="flex items-center gap-1.5">
                                         <span>Health factor</span>
-                                        <InfoTooltip content="Liquidation < 1.0. Safety of your collateral against your debt." size={12} />
+                                        <InfoTooltip content="Safety of your collateral against your debt." size={12} />
                                     </div>
                                     <div className="text-right font-medium">
                                         {(() => {
@@ -1127,7 +1127,9 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                     <div className="flex items-center gap-1.5 font-bold">
                                                         <span className={getHfColor(currentHf)}>{formatHf(currentHf)}</span>
                                                         <span className="text-slate-400 font-normal">→</span>
-                                                        <span className={getHfColor(simulatedHf)}>{formatHf(simulatedHf)}</span>
+                                                        <InfoTooltip content="Liquidation < 1.0" size={12}>
+                                                            <span className={getHfColor(simulatedHf)}>{formatHf(simulatedHf)}</span>
+                                                        </InfoTooltip>
                                                     </div>
                                                 </div>
                                             );
@@ -1190,7 +1192,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                 {/* Supply APY Row */}
                                 <div className="flex justify-between items-center text-[13px] text-slate-600 dark:text-slate-300 font-medium">
                                     <div className="flex items-center gap-1.5">
-                                        <span>Supply apy</span>
+                                        <span>Supply APY</span>
                                         <InfoTooltip content="Annual yield on deposited assets." size={12} />
                                     </div>
                                     <div className="text-right flex items-center gap-1.5">
@@ -1392,7 +1394,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
                     if (toMarketToken && !toCanBeCollateral) {
                         alerts.push({
-                            label: 'Collateral Warning:',
+                            label: 'Warning:',
                             message: `${toToken.symbol} cannot be used as collateral on Aave.`,
                             isDanger: false,
                         });
@@ -1400,7 +1402,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
                     if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0) {
                         alerts.push({
-                            label: 'Liquidation Risk:',
+                            label: 'Danger:',
                             message: `This swap will leave your Health Factor very low (${simulatedHf.toFixed(2)}).`,
                             isDanger: true,
                         });
@@ -1430,7 +1432,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                         <div className="space-y-1 mb-1">
                             {alerts.map((alert, i) => (
                                 <div key={`${alert.label}-${i}`} className="flex justify-center gap-1.5 px-1">
-                                    <span className="text-[11px] font-medium text-slate-400 dark:text-slate-500">{alert.label}</span>
+                                    <span className={`text-[11px] font-bold ${alert.isDanger ? 'text-red-500' : 'text-amber-500'}`}>{alert.label}</span>
                                     <div className={`flex items-center gap-1 text-[11px] font-bold ${alert.isDanger ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-500'}`}>
                                         <span className="text-center">{alert.message}</span>
                                         <AlertTriangle className="w-3 h-3 shrink-0" />
