@@ -62,6 +62,7 @@ class ApiController extends Controller
         $signatureHeaders = [
             'X-Internal-Signature' => $signature,
             'X-Internal-Timestamp' => $timestamp,
+            'X-Internal-Session-ID' => request()->session()->getId(),
         ];
 
         if ($signingV2Enabled && $nonce !== null) {
@@ -79,9 +80,7 @@ class ApiController extends Controller
                 'Content-Type' => 'application/json',
                 'Accept' => 'application/json',
                 'X-Request-Id' => $requestId,
-            ], $signatureHeaders))->send($method, $fullUrl, [
-                'json' => $body
-            ]);
+            ], $signatureHeaders))->withBody($bodyString, 'application/json')->send($method, $fullUrl);
 
             $jsonResponse = response()->json($response->json(), $response->status());
 

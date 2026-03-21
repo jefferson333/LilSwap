@@ -73,6 +73,7 @@ interface UseParaswapQuoteProps {
     adapterAddress?: string | null;
     enabled?: boolean;
     freezeQuote?: boolean;
+    marketAssets?: any[];
 }
 
 export const useParaswapQuote = ({
@@ -87,7 +88,8 @@ export const useParaswapQuote = ({
     account,
     adapterAddress = null,
     enabled = true,
-    freezeQuote = false
+    freezeQuote = false,
+    marketAssets = []
 }: UseParaswapQuoteProps) => {
     const [swapQuote, setSwapQuote] = useState<any>(null);
     const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
@@ -275,9 +277,14 @@ export const useParaswapQuote = ({
 
                 const destAmount = destAmountBigInt.toString();
 
-                const apyPercentToSend = (typeof fromToken?.variableBorrowRate === 'number')
-                    ? fromToken.variableBorrowRate * 100
-                    : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate * 100 : null);
+                const fromAddrApy = (fromToken?.address || fromToken?.underlyingAsset || '').toLowerCase();
+                const fromMarketToken = (marketAssets || []).find(m => (m.address || m.underlyingAsset || '').toLowerCase() === fromAddrApy);
+                
+                const apyPercentToSend = fromMarketToken?.variableBorrowRate !== undefined
+                    ? fromMarketToken.variableBorrowRate * 100
+                    : ((typeof fromToken?.variableBorrowRate === 'number')
+                        ? fromToken.variableBorrowRate * 100
+                        : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate * 100 : null));
 
                 const routeResult = await getDebtQuote({
                     fromToken: { address: fromTokenAddress, decimals: fromToken.decimals, symbol: fromToken.symbol },

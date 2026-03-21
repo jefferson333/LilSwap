@@ -134,6 +134,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         account,
         enabled: isOpen,
         freezeQuote,
+        marketAssets: localMarketAssets,
     });
 
     const {
@@ -203,19 +204,19 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
     const getDisplaySymbol = useCallback((token: any, allTokens: any[]) => {
         if (!token) {
-return '';
-}
+            return '';
+        }
 
         const addr = (token.address || token.underlyingAsset || '').toLowerCase();
 
         // Arbitrum Specifics - Explicitly disambiguate USDC
         if (addr === '0xaf88d065e77c8cc2239327c5edb3a432268e5831') {
-return 'USDC';
-}
+            return 'USDC';
+        }
 
         if (addr === '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8') {
-return 'USDC.e';
-}
+            return 'USDC.e';
+        }
 
         const hasCollision = allTokens.some(t =>
             t.symbol === token.symbol &&
@@ -1092,21 +1093,7 @@ return 'USDC.e';
                                             </div>
                                         </div>
                                     )}
-                                    {/* Borrow APY Change */}
-                                    <div className="flex justify-between items-center group">
-                                        <div className="flex items-center gap-1.5 text-slate-500">
-                                            <span>Borrow APY</span>
-                                            <InfoTooltip content="Interest rate on your debt." size={12} />
-                                        </div>
-                                        <div className="font-bold flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                                            <span className="text-slate-400 line-through">
-                                                {((fromToken?.variableBorrowRate || 0) * 100).toFixed(2)}%
-                                            </span>
-                                            <span className="text-emerald-500">
-                                                {((toToken?.variableBorrowRate || 0) * 100).toFixed(2)}%
-                                            </span>
-                                        </div>
-                                    </div>
+
                                 </div>
                             )}
 
@@ -1116,7 +1103,7 @@ return 'USDC.e';
                                 <div className="flex justify-between items-start text-[13px] text-slate-600 dark:text-slate-300 font-medium">
                                     <div className="flex items-center gap-1.5">
                                         <span>Health factor</span>
-                                        <InfoTooltip content="Liquidation < 1.0. Safety of your collateral against borrowed assets." size={12} />
+                                        <InfoTooltip content="Safety of your collateral against borrowed assets." size={12} />
                                     </div>
                                     <div className="text-right font-medium">
                                         {(() => {
@@ -1185,7 +1172,9 @@ return 'USDC.e';
                                                     <div className="flex items-center gap-1.5 font-bold">
                                                         <span className={getHfColor(currentHf)}>{formatHf(currentHf)}</span>
                                                         <span className="text-slate-400 font-normal">→</span>
-                                                        <span className={getHfColor(simulatedHf)}>{formatHf(simulatedHf)}</span>
+                                                        <InfoTooltip content="Liquidation < 1.0" size={12}>
+                                                            <span className={getHfColor(simulatedHf)}>{formatHf(simulatedHf)}</span>
+                                                        </InfoTooltip>
                                                     </div>
                                                 </div>
                                             );
@@ -1196,7 +1185,7 @@ return 'USDC.e';
                                 {/* Borrow APY Row */}
                                 <div className="flex justify-between items-center text-[13px] text-slate-600 dark:text-slate-300 font-medium">
                                     <div className="flex items-center gap-1.5">
-                                        <span>Borrow apy</span>
+                                        <span>Borrow APY</span>
                                         <InfoTooltip content="Annual interest on borrowed assets." size={12} />
                                     </div>
                                     <div className="text-right flex items-center gap-1.5">
@@ -1389,7 +1378,7 @@ return 'USDC.e';
                                     <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
                                         <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
                                         <div className="flex-1 min-w-0">
-                                            <p className="text-xs text-red-800 dark:text-red-300 font-bold">Liquidation Risk</p>
+                                            <p className="text-xs text-red-800 dark:text-red-300 font-bold uppercase tracking-tight">Danger</p>
                                             <p className="text-[10px] text-red-600 dark:text-red-400">This swap would bring your Health Factor too close to 1.00.</p>
                                         </div>
                                     </div>
