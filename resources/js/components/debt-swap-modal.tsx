@@ -30,31 +30,9 @@ import { InfoTooltip } from './info-tooltip';
 import { Modal } from './modal';
 import { TokenSelector } from './token-selector';
 import { Button } from './ui/button';
+import { formatUSD, formatCompactToken, getDisplaySymbol, formatAPY, formatHF, formatCompactNumber } from '../utils/formatters';
 
-// Helper for USD formatting
-const formatUSD = (value: number | null | undefined) => {
-    if (value == null || isNaN(value)) {
-        return '$0.00';
-    }
 
-    if (value === 0) {
-        return '$0.00';
-    }
-
-    if (value > 0 && value < 0.01) {
-        return '< $0.01';
-    }
-
-    if (value >= 1_000_000) {
-        return `$${(value / 1_000_000).toFixed(2)}M`;
-    }
-
-    if (value >= 1_000) {
-        return `$${(value / 1_000).toFixed(2)}K`;
-    }
-
-    return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
 
 interface DebtSwapModalProps {
     isOpen: boolean;
@@ -76,6 +54,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
     initialToToken = null,
     providedBorrows = null,
     marketAssets: externalMarketAssets = null,
+    donator = null,
 }) => {
     const { account, provider, selectedNetwork, networkRpcProvider } = useWeb3();
     const { addToast } = useToast();
@@ -99,6 +78,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
     const [swappableTokens, setSwappableTokens] = useState<Record<string, { swappable: boolean | null; checking: boolean }>>({});
     const [showMethodMenu, setShowMethodMenu] = useState(false);
     const [isPairValidationRunning, setIsPairValidationRunning] = useState(false);
+    const [isUSDMode, setIsUSDMode] = useState(false);
 
     // Refs
     const methodMenuRef = useRef<HTMLDivElement>(null);
@@ -138,6 +118,42 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         marketAssets: localMarketAssets,
     });
 
+    // --- Computed Values ---
+
+    const activeDebtAssets = useMemo(() => {
+        const sourceBorrows = providedBorrows || borrows || [];
+
+        return sourceBorrows
+            .filter(b => b.amount && BigInt(b.amount) > BigInt(0))
+            .map(b => {
+                const match = (localMarketAssets || []).find(m => m.underlyingAsset?.toLowerCase() === b.underlyingAsset?.toLowerCase());
+
+                return { ...b, ...match };
+            });
+    }, [providedBorrows, borrows, localMarketAssets]);
+
+    const debtBalance = useMemo(() => {
+        if (!fromToken) {
+            return BigInt(0);
+        }
+
+        const addr = (fromToken.underlyingAsset || fromToken.address || '').toLowerCase();
+        const borrow = activeDebtAssets.find(b => (b.underlyingAsset || '').toLowerCase() === addr);
+
+        return borrow ? BigInt(borrow.amount) : BigInt(0);
+    }, [fromToken, activeDebtAssets]);
+
+    const formattedDebt = useMemo(() => {
+        if (!fromToken) {
+            return '0';
+        }
+
+        const addr = (fromToken.underlyingAsset || fromToken.address || '').toLowerCase();
+        const borrow = activeDebtAssets.find(b => (b.underlyingAsset || '').toLowerCase() === addr);
+
+        return borrow?.formattedAmount || '0';
+    }, [fromToken, activeDebtAssets]);
+
     const {
         isActionLoading,
         isSigning,
@@ -155,6 +171,8 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         fromToken,
         toToken,
         allowance: BigInt(0), // Debt swap usually handles its own allowance/permit checks
+        swapAmount,
+        debtBalance,
         swapQuote,
         slippage,
         fetchDebtData: refreshPositions,
@@ -174,7 +192,95 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         }
     });
 
+    const isBusy = isActionLoading;
+    const isInsufficientBalance = swapAmount > (debtBalance || 0n);
+
     // --- Helpers ---
+
+    const handleToggleUSDMode = useCallback(() => {
+        if (!fromToken) {
+            setIsUSDMode(!isUSDMode);
+
+            return;
+        }
+
+        const price = parseFloat(fromToken.priceInUSD || '0');
+
+        if (price <= 0 || !inputValue) {
+            setIsUSDMode(!isUSDMode);
+
+            return;
+        }
+
+        if (isUSDMode) {
+            // USD -> Token
+            const usdAmount = parseFloat(inputValue);
+            const tokenAmount = usdAmount / price;
+            setInputValue(tokenAmount.toFixed(tokenAmount < 0.0001 ? 8 : 6).replace(/\.?0+$/, ''));
+        } else {
+            // Token -> USD
+            const tokenAmount = parseFloat(inputValue);
+            const usdAmount = tokenAmount * price;
+            setInputValue(usdAmount.toFixed(2));
+        }
+        setIsUSDMode(!isUSDMode);
+    }, [isUSDMode, inputValue, fromToken]);
+
+    const fromSecondaryValue = useMemo(() => {
+        if (!fromToken) {
+            return null;
+        }
+
+        if (isUSDMode) {
+            // In USD mode, secondary is Token units
+            if (swapAmount === BigInt(0)) {
+                return `0 ${fromToken.symbol}`;
+            }
+
+            try {
+                const tokenAmount = ethers.formatUnits(swapAmount, fromToken.decimals || 18);
+                return formatCompactToken(tokenAmount, fromToken.symbol);
+            } catch {
+                return null;
+            }
+        } else {
+            if (swapQuote?.priceRoute?.destUSD) {
+                return formatUSD(parseFloat(swapQuote.priceRoute.destUSD));
+            }
+
+            const rawPrice = parseFloat(fromToken.priceInUSD || '0');
+            const price = rawPrice > 1_000_000_000 ? rawPrice / 1e8 : rawPrice;
+            const tokenAmount = parseFloat(inputValue || '0');
+
+            return formatUSD(tokenAmount * price);
+        }
+    }, [isUSDMode, fromToken, swapAmount, swapQuote, inputValue]);
+
+    const toSecondaryValue = useMemo(() => {
+        if (!toToken) {
+            return null;
+        }
+
+        if (swapQuote?.priceRoute?.srcUSD) {
+            return formatUSD(parseFloat(swapQuote.priceRoute.srcUSD));
+        }
+
+        // Fallback to oracle price
+        const rawPrice = parseFloat(toToken.priceInUSD || '0');
+        const price = rawPrice > 1_000_000_000 ? rawPrice / 1e8 : rawPrice;
+
+        if (swapQuote?.srcAmount) {
+            try {
+                const tokenAmount = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
+
+                return formatUSD(tokenAmount * price);
+            } catch {
+                return null;
+            }
+        }
+
+        return null;
+    }, [toToken, swapQuote]);
 
     const getBorrowStatus = useCallback((token: any) => {
         if (!token) {
@@ -203,49 +309,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         return { borrowable: canBorrow, reasons };
     }, []);
 
-    const getDisplaySymbol = useCallback((token: any, allTokens: any[]) => {
-        if (!token) {
-            return '';
-        }
 
-        const addr = (token.address || token.underlyingAsset || '').toLowerCase();
-
-        // Arbitrum Specifics - Explicitly disambiguate USDC
-        if (addr === '0xaf88d065e77c8cc2239327c5edb3a432268e5831') {
-            return 'USDC';
-        }
-
-        if (addr === '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8') {
-            return 'USDC.e';
-        }
-
-        const hasCollision = allTokens.some(t =>
-            t.symbol === token.symbol &&
-            (t.address || t.underlyingAsset || '').toLowerCase() !== (token.address || token.underlyingAsset || '').toLowerCase()
-        );
-
-        if (hasCollision) {
-            const name = (token.name || '').toLowerCase();
-            const symbol = (token.symbol || '').toLowerCase();
-
-            // Aave-style: .e for bridged/pos, plain for native
-            // We look for common bridged keywords or patterns
-            const isBridged = name.includes('bridged') ||
-                name.includes('(pos)') ||
-                name.includes('(e)') ||
-                name.includes('polygon') ||
-                symbol.endsWith('.e');
-
-            if (isBridged) {
-                // Return SYMBOL.e (removing any existing .e to avoid .e.e)
-                const baseSymbol = token.symbol.replace(/\.e$/i, '');
-
-                return `${baseSymbol}.e`;
-            }
-        }
-
-        return token.symbol;
-    }, []);
 
     const validatePairSwappability = useCallback(async (destToken: any) => {
         if (!fromToken || !destToken || !effectiveNetwork?.chainId) {
@@ -396,6 +460,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
         setInputValue('');
         setSwapAmount(BigInt(0));
+        setIsUSDMode(false);
         clearQuote();
     }, [fromToken, isOpen, clearQuote]);
 
@@ -417,6 +482,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         if (!isOpen) {
             setInputValue('');
             setSwapAmount(BigInt(0));
+            setIsUSDMode(false);
             setShowSlippageSettings(false);
             setFreezeQuote(false);
             setShowMethodMenu(false);
@@ -591,41 +657,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
     // --- Computed Values ---
 
-    const activeDebtAssets = useMemo(() => {
-        const sourceBorrows = providedBorrows || borrows || [];
-
-        return sourceBorrows
-            .filter(b => b.amount && BigInt(b.amount) > BigInt(0))
-            .map(b => {
-                const match = (localMarketAssets || []).find(m => m.underlyingAsset?.toLowerCase() === b.underlyingAsset?.toLowerCase());
-
-                return { ...b, ...match };
-            });
-    }, [providedBorrows, borrows, localMarketAssets]);
-
-    const debtBalance = useMemo(() => {
-        if (!fromToken) {
-            return BigInt(0);
-        }
-
-        const addr = (fromToken.underlyingAsset || fromToken.address || '').toLowerCase();
-        const borrow = activeDebtAssets.find(b => (b.underlyingAsset || '').toLowerCase() === addr);
-
-        return borrow ? BigInt(borrow.amount) : BigInt(0);
-    }, [fromToken, activeDebtAssets]);
-
-    const formattedDebt = useMemo(() => {
-        if (!fromToken) {
-            return '0';
-        }
-
-        const addr = (fromToken.underlyingAsset || fromToken.address || '').toLowerCase();
-        const borrow = activeDebtAssets.find(b => (b.underlyingAsset || '').toLowerCase() === addr);
-
-        return borrow?.formattedAmount || '0';
-    }, [fromToken, activeDebtAssets]);
-
-    const isBusy = isActionLoading;
+    // isBusy is now defined above with the hook
 
     // --- Render Helpers ---
 
@@ -635,14 +667,28 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
         const tokenAddr = (token.address || token.underlyingAsset || '').toLowerCase();
 
-        const borrowStatus = getBorrowStatus(token);
-        reasons.push(...borrowStatus.reasons);
+        // 1. If selecting for 'Swap From', we prioritize the actual position balance
+        if (selectingForFrom) {
+            const borrowPos = activeDebtAssets.find(b => (b.underlyingAsset || '').toLowerCase() === tokenAddr);
+            if (borrowPos) {
+                // Focus ONLY on balance for source positions
+                reasons.push(`${borrowPos.formattedAmount} ${token.symbol} position`);
+            } else {
+                // If not a position, we still want to suppress protocol errors here as user expects positions
+                disabled = true;
+                reasons.push('Not a position');
+            }
+        } else {
+            // 2. If selecting for 'Swap To', we use standard borrow checks
+            const borrowStatus = getBorrowStatus(token);
+            reasons.push(...borrowStatus.reasons);
 
-        if (!borrowStatus.borrowable) {
-            disabled = true;
+            if (!borrowStatus.borrowable) {
+                disabled = true;
+            }
         }
 
-        // Block selecting the same token
+        // 3. Block selecting the same token
         if (selectingForFrom) {
             if (toToken && (toToken.address || toToken.underlyingAsset || '').toLowerCase() === tokenAddr) {
                 disabled = true;
@@ -664,7 +710,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             reasons.push('Checking availability...');
         }
 
-        return { disabled, reasons };
+        return { disabled, reasons: reasons.filter(Boolean) };
     };
 
     const selectorTokens = selectingForFrom
@@ -790,33 +836,86 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                 <CompactAmountInput
                     token={fromToken}
                     value={inputValue}
+                    isUSDMode={isUSDMode}
+                    onToggleUSDMode={handleToggleUSDMode}
+                    secondaryValue={fromSecondaryValue}
+                    isError={isInsufficientBalance}
                     onChange={(val) => {
                         const normalized = normalizeDecimalInput(val);
                         setInputValue(normalized);
 
                         try {
-                            if (!normalized) {
+                            if (!normalized || normalized === '.' || parseFloat(normalized) === 0) {
                                 setSwapAmount(BigInt(0));
-                            } else {
-                                const parsable = normalized.endsWith('.') ? `${normalized.slice(0, -1) || '0'}` : normalized;
-                                const parsed = ethers.parseUnits(parsable, fromToken?.decimals || 18);
-                                const capped = parsed > debtBalance ? debtBalance : parsed;
-                                setSwapAmount(capped);
+
+                                return;
                             }
-                        } catch {
-                            // Ignore invalid partial decimal input while typing.
+
+                            let amountBI: bigint;
+
+                            if (isUSDMode) {
+                                const price = parseFloat(fromToken?.priceInUSD || '0');
+
+                                if (price > 0) {
+                                    const tokenAmountNum = parseFloat(normalized) / price;
+                                    amountBI = ethers.parseUnits(tokenAmountNum.toFixed(fromToken?.decimals || 18), fromToken?.decimals || 18);
+                                } else {
+                                    amountBI = BigInt(0);
+                                }
+                            } else {
+                                amountBI = ethers.parseUnits(normalized, fromToken.decimals || 18);
+                            }
+
+                            setSwapAmount(amountBI);
+                        } catch (e) {
+                            console.error('Error parsing amount', e);
+                            setSwapAmount(BigInt(0));
                         }
                     }}
+                    onApplyMax={() => {
+                        if (!debtBalance || debtBalance === BigInt(0)) {
+                            return;
+                        }
+
+                        const maxTokenAmount = ethers.formatUnits(debtBalance, fromToken.decimals || 18);
+
+                        if (isUSDMode) {
+                            const price = parseFloat(fromToken.priceInUSD || '0');
+                            const maxUsdAmount = parseFloat(maxTokenAmount) * price;
+                            setInputValue(maxUsdAmount.toFixed(2));
+                        } else {
+                            setInputValue(maxTokenAmount);
+                        }
+
+                        setSwapAmount(debtBalance);
+                    }}
+                    onApplyPct={(pct) => {
+                        if (!debtBalance || debtBalance === BigInt(0)) {
+                            return;
+                        }
+
+                        const amountBI = (debtBalance * BigInt(pct)) / BigInt(100);
+                        const tokenAmount = ethers.formatUnits(amountBI, fromToken.decimals || 18);
+
+                        if (isUSDMode) {
+                            const price = parseFloat(fromToken.priceInUSD || '0');
+                            const usdAmount = parseFloat(tokenAmount) * price;
+                            setInputValue(usdAmount.toFixed(2));
+                        } else {
+                            setInputValue(tokenAmount);
+                        }
+
+                        setSwapAmount(amountBI);
+                    }}
                     maxAmount={debtBalance}
-                    decimals={fromToken?.decimals || 18}
+                    decimals={isUSDMode ? 2 : (fromToken?.decimals || 18)}
                     formattedBalance={formattedDebt}
-                    disabled={isBusy}
+                    disabled={isActionLoading}
+                    displaySymbol={fromToken ? getDisplaySymbol(fromToken, localMarketAssets) : undefined}
                     onTokenSelect={() => {
                         setSelectingForFrom(true);
                         setTokenSelectorOpen(true);
                     }}
-                    usdValue={fromToken && inputValue ? formatUSD(parseFloat(inputValue) * parseFloat(fromToken.priceInUSD || '0')) : null}
-                    displaySymbol={fromToken ? getDisplaySymbol(fromToken, localMarketAssets) : undefined}
                 />
 
                 {/* Quote Indicator */}
@@ -860,9 +959,13 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                 </div>
                             ) : swapQuote && toToken && fromToken ? (
                                 <div className="flex items-center gap-2 overflow-hidden">
-                                    <span className="text-2xl font-mono font-bold text-slate-900 dark:text-white block py-0.5 truncate leading-none overflow-hidden text-ellipsis whitespace-nowrap">
-                                        {ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18)}
-                                    </span>
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18)}
+                                        className="text-2xl font-mono font-bold bg-transparent border-none text-slate-900 dark:text-white block w-full py-0.5 leading-none focus:outline-none cursor-text select-all"
+                                    />
+
                                 </div>
                             ) : (
                                 <div className="text-slate-500 text-sm py-1.5 min-h-7 flex items-center">
@@ -878,7 +981,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                 setTokenSelectorOpen(true);
                             }}
                             className="flex items-center gap-1.5 py-1 px-1 hover:opacity-75 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-                            disabled={isActionLoading}
+                            disabled={isBusy}
                         >
                             {toToken?.symbol ? (
                                 <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-border-light dark:border-slate-600/30">
@@ -904,15 +1007,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                     {/* Bottom Row: USD Value */}
                     <div className="flex items-center justify-between mt-0 pl-1.5">
                         <div className="text-xs text-slate-500 block min-h-4">
-                            {swapQuote && toToken && (
-                                <span>
-                                    {(() => {
-                                        const amount = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
-
-                                        return `~ ${formatUSD(amount * parseFloat(toToken.priceInUSD || '0'))}`;
-                                    })()}
-                                </span>
-                            )}
+                            {toSecondaryValue && <span>{toSecondaryValue}</span>}
                         </div>
                     </div>
                 </div>
@@ -936,16 +1031,16 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
                                         if (inputF > 0 && outputF > 0) {
                                             if (invertRate) {
-                                                return (inputF / outputF).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets);
+                                                return (inputF / outputF).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets);
                                             } else {
-                                                return (outputF / inputF).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
+                                                return (outputF / inputF).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
                                             }
                                         }
                                     }
 
                                     return invertRate
-                                        ? (parseFloat(toToken.priceInUSD) / parseFloat(fromToken.priceInUSD)).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets)
-                                        : (parseFloat(fromToken.priceInUSD) / parseFloat(toToken.priceInUSD)).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
+                                        ? (parseFloat(toToken.priceInUSD) / parseFloat(fromToken.priceInUSD)).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets)
+                                        : (parseFloat(fromToken.priceInUSD) / parseFloat(toToken.priceInUSD)).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
                                 })()}
                             </span>
                         </button>
@@ -1064,7 +1159,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                                         return 'Service Fee (--)';
                                                     }
 
-                                                    return `Service Fee (${(feeBps / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 })}%)`;
+                                                    return `Service Fee (${(feeBps / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}%)`;
                                                 })()}
                                             </span>
                                             {swapQuote?.discountPercent > 0 && (
@@ -1093,7 +1188,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                                     const amount = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
                                                     const fee = amount * (feeBps / 10000);
 
-                                                    return fee < 0.00001 ? '< 0.00001' : fee.toLocaleString(undefined, { maximumFractionDigits: 6 });
+                                                    return fee < 0.00001 ? '< 0.00001' : fee.toLocaleString('en-US', { maximumFractionDigits: 6 });
                                                 })()}
                                             </span>
                                         </div>
@@ -1179,15 +1274,15 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                                 return 'text-red-500';
                                             };
 
-                                            const formatHf = (hf: number) => hf === -1 ? <span className="text-lg leading-none">∞</span> : hf.toFixed(2);
-
                                             return (
                                                 <div className="flex flex-col items-end">
                                                     <div className="flex items-center gap-1.5 font-bold">
-                                                        <span className={getHfColor(currentHf)}>{formatHf(currentHf)}</span>
+                                                        <span className={getHfColor(currentHf)}>{formatHF(currentHf)}</span>
                                                         <span className="text-slate-400 font-normal">→</span>
                                                         <InfoTooltip content="Liquidation < 1.0" size={12}>
-                                                            <span className={getHfColor(simulatedHf)}>{formatHf(simulatedHf)}</span>
+                                                            <span className={getHfColor(simulatedHf)}>
+                                                                {isInsufficientBalance ? '—' : formatHF(simulatedHf)}
+                                                            </span>
                                                         </InfoTooltip>
                                                     </div>
                                                 </div>
@@ -1214,9 +1309,9 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
                                             return (
                                                 <>
-                                                    <span className="text-slate-900 dark:text-slate-100">{currentApy < 0.01 ? '< 0.01' : currentApy.toFixed(2)}%</span>
+                                                    <span className="text-slate-900 dark:text-slate-100">{formatAPY(currentApy)}</span>
                                                     <span className="text-slate-400 font-normal">→</span>
-                                                    <span className="text-slate-900 dark:text-slate-100">{newApy < 0.01 ? '< 0.01' : newApy.toFixed(2)}%</span>
+                                                    <span className="text-slate-900 dark:text-slate-100">{formatAPY(newApy)}</span>
                                                 </>
                                             );
                                         })()}
@@ -1271,15 +1366,19 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                                         <div className="w-4 h-4 rounded-full overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700">
                                                             <img src={getTokenLogo(fromToken.symbol)} className="w-full h-full object-cover" />
                                                         </div>
-                                                        <span>{fromRemaining === 0 ? '0' : (fromRemaining >= 1000 ? (fromRemaining / 1000).toFixed(2) + 'K' : fromRemaining.toLocaleString(undefined, { maximumFractionDigits: 6 }))}</span>
+                                                        <span>{fromRemaining === 0 ? '0' : (fromRemaining >= 1000 ? (fromRemaining / 1000).toFixed(2) + 'K' : fromRemaining.toLocaleString('en-US', { maximumFractionDigits: 6 }))}</span>
                                                     </div>
                                                     <span className="text-slate-400 font-normal">→</span>
-                                                    <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
-                                                        <div className="w-4 h-4 rounded-full overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700">
-                                                            <img src={getTokenLogo(toToken.symbol)} className="w-full h-full object-cover" />
+                                                    {isInsufficientBalance ? (
+                                                        <span className="text-slate-400 font-medium">—</span>
+                                                    ) : (
+                                                        <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100 font-medium">
+                                                            <div className="w-4 h-4 rounded-full overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700">
+                                                                <img src={getTokenLogo(toToken.symbol)} className="w-full h-full object-cover" />
+                                                            </div>
+                                                            <span>{toTotal === 0 ? '0' : (toTotal >= 1000 ? (toTotal / 1000).toFixed(2) + 'K' : toTotal.toLocaleString('en-US', { maximumFractionDigits: 6 }))}</span>
                                                         </div>
-                                                        <span>{toTotal === 0 ? '0' : (toTotal >= 1000 ? (toTotal / 1000).toFixed(2) + 'K' : toTotal.toLocaleString(undefined, { maximumFractionDigits: 6 }))}</span>
-                                                    </div>
+                                                    )}
                                                 </>
                                             );
                                         })()}
@@ -1387,7 +1486,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                 }
                             }
 
-                            if (simulatedHf < 1.05 && simulatedHf !== -1) {
+                            if (!isInsufficientBalance && simulatedHf < 1.05 && simulatedHf !== -1) {
                                 return (
                                     <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-2">
                                         <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
@@ -1421,15 +1520,17 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
                 {/* Action Button */}
                 <Button
-                    disabled={isBusy || !swapQuote || swapAmount === BigInt(0)}
+                    disabled={isBusy || !swapQuote || swapAmount === BigInt(0) || isInsufficientBalance}
                     onClick={handleSwap}
-                    className="w-full py-3 h-auto font-bold rounded-xl mt-2"
+                    className={`w-full py-3 h-auto font-bold rounded-xl mt-2 ${isInsufficientBalance ? 'bg-rose-500 hover:bg-rose-600 border-rose-600 text-white' : ''}`}
                 >
                     {isActionLoading ? (
                         <>
                             <RefreshCw className="w-4 h-4 animate-spin" />
                             {isSigning ? 'Signing in wallet...' : 'Processing...'}
                         </>
+                    ) : isInsufficientBalance ? (
+                        'Insufficient Balance'
                     ) : (
                         <>
                             <ArrowRightLeft className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
@@ -1448,11 +1549,16 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                     description={selectingForFrom ? 'Choose a token to swap from your debt positions' : 'Choose a token to swap into'}
                     tokens={filteredSelectorTokens}
                     onSelect={(token) => {
+                        const chainId = selectedNetwork?.chainId || 1;
+                        const tokenAddr = (token.address || token.underlyingAsset || '');
                         if (selectingForFrom) {
                             setFromToken(token);
+                            saveTokenSelection(chainId, 'debt-from', tokenAddr);
                         } else {
                             setToToken(token);
+                            saveTokenSelection(chainId, 'debt', tokenAddr);
                         }
+                        setTokenSelectorOpen(false);
                     }}
                     renderStatus={renderTokenStatus}
                     hideOverlay={true}

@@ -125,7 +125,7 @@ export const AmountInput: React.FC<AmountInputProps> = ({
     ];
 
     const formattedMax = maxAmount > BigInt(0)
-        ? Number(ethers.formatUnits(maxAmount, decimals)).toLocaleString(undefined, { maximumFractionDigits: 6 })
+        ? Number(ethers.formatUnits(maxAmount, decimals)).toLocaleString('en-US', { maximumFractionDigits: 6 })
         : '0';
 
     return (

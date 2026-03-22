@@ -17,6 +17,8 @@ interface UseDebtSwitchActionsProps {
     fromToken: any;
     toToken: any;
     allowance: bigint;
+    swapAmount: bigint;
+    debtBalance: bigint | null;
     swapQuote: any;
     slippage: number;
     addLog?: (message: string, type?: string) => void;
@@ -38,6 +40,8 @@ export const useDebtSwitchActions = ({
     fromToken,
     toToken,
     allowance,
+    swapAmount,
+    debtBalance,
     swapQuote,
     slippage,
     addLog,
@@ -234,6 +238,13 @@ export const useDebtSwitchActions = ({
         setTxError(null);
         clearQuoteError?.();
         setUserRejected(false);
+
+        if (debtBalance !== null && swapAmount > debtBalance) {
+            addLog?.('Insufficient balance to perform this swap.', 'error');
+            setTxError('Insufficient balance');
+
+            return;
+        }
 
         let activeQuote = swapQuote;
 

@@ -32,31 +32,9 @@ import { InfoTooltip } from './info-tooltip';
 import { Modal } from './modal';
 import { TokenSelector } from './token-selector';
 import { Button } from './ui/button';
+import { formatUSD, formatCompactToken, getDisplaySymbol, formatAPY, formatHF, formatCompactNumber } from '../utils/formatters';
 
-// Helper for USD formatting
-const formatUSD = (value: number | null | undefined) => {
-    if (value == null || isNaN(value)) {
-        return '$0.00';
-    }
 
-    if (value === 0) {
-        return '$0.00';
-    }
-
-    if (value > 0 && value < 0.01) {
-        return '< $0.01';
-    }
-
-    if (value >= 1_000_000) {
-        return `$${(value / 1_000_000).toFixed(2)}M`;
-    }
-
-    if (value >= 1_000) {
-        return `$${(value / 1_000).toFixed(2)}K`;
-    }
-
-    return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
 
 interface CollateralSwapModalProps {
     isOpen: boolean;
@@ -66,6 +44,7 @@ interface CollateralSwapModalProps {
     providedSupplies?: any[] | null;
     marketAssets?: any[] | null;
     chainId?: number | null;
+    donator?: any | null;
 }
 
 const MAX_PREVALIDATIONS_PER_OPEN = 8;
@@ -77,6 +56,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
     initialToToken = null,
     providedSupplies = null,
     marketAssets: externalMarketAssets = null,
+    donator = null,
 }) => {
     const { account, provider, selectedNetwork, networkRpcProvider } = useWeb3();
     const { addToast } = useToast();
@@ -115,6 +95,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
     const [freezeQuote, setFreezeQuote] = useState(false);
     const [showMethodMenu, setShowMethodMenu] = useState(false);
     const [isPairValidationRunning, setIsPairValidationRunning] = useState(false);
+    const [isUSDMode, setIsUSDMode] = useState(false);
 
     const slippageMenuRef = useRef<HTMLDivElement>(null);
     const methodMenuRef = useRef<HTMLDivElement>(null);
@@ -212,70 +193,85 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         return (pos as any)?.formattedAmount || (pos as any)?.formattedBalance || '0';
     }, [fromToken, activeSupplies]);
 
-    // Helper to get unique display symbol if there are collisions
-    const getDisplaySymbol = useCallback((token: any, allTokens: any[]) => {
-        if (!token) {
-            return '';
-        }
+    const isInsufficientBalance = swapAmount > (availableBalance || 0n);
 
-        const addr = (token.address || token.underlyingAsset || '').toLowerCase();
 
-        // Arbitrum Specifics - Explicitly disambiguate USDC
-        if (addr === '0xaf88d065e77c8cc2239327c5edb3a432268e5831') {
-            return 'USDC';
-        }
-
-        if (addr === '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8') {
-            return 'USDC.e';
-        }
-
-        const hasCollision = allTokens.some(t =>
-            t.symbol === token.symbol &&
-            (t.address || t.underlyingAsset || '').toLowerCase() !== (token.address || token.underlyingAsset || '').toLowerCase()
-        );
-
-        if (hasCollision) {
-            const name = (token.name || '').toLowerCase();
-            const symbol = (token.symbol || '').toLowerCase();
-
-            // Aave-style: .e for bridged/pos, plain for native
-            // We look for common bridged keywords or patterns
-            const isBridged = name.includes('bridged') ||
-                name.includes('(pos)') ||
-                name.includes('(e)') ||
-                name.includes('polygon') ||
-                symbol.endsWith('.e');
-
-            if (isBridged) {
-                // Return SYMBOL.e (removing any existing .e to avoid .e.e)
-                const baseSymbol = token.symbol.replace(/\.e$/i, '');
-
-                return `${baseSymbol}.e`;
-            }
-        }
-
-        return token.symbol;
-    }, []);
 
     // --- Helpers ---
+
+    const handleToggleUSDMode = useCallback(() => {
+        if (!fromToken) {
+            setIsUSDMode(!isUSDMode);
+            return;
+        }
+        const price = parseFloat(fromToken.priceInUSD || '0');
+        if (price <= 0 || !inputValue) {
+            setIsUSDMode(!isUSDMode);
+            return;
+        }
+        if (isUSDMode) {
+            const usdAmount = parseFloat(inputValue);
+            const tokenAmount = usdAmount / price;
+            setInputValue(tokenAmount.toFixed(tokenAmount < 0.0001 ? 8 : 6).replace(/\.?0+$/, ''));
+        } else {
+            const tokenAmount = parseFloat(inputValue);
+            setInputValue((tokenAmount * price).toFixed(2));
+        }
+        setIsUSDMode(!isUSDMode);
+    }, [isUSDMode, inputValue, fromToken]);
+
+    const fromSecondaryValue = useMemo(() => {
+        if (!fromToken) return null;
+        if (isUSDMode) {
+            if (swapAmount === BigInt(0)) return `0 ${fromToken.symbol}`;
+            try {
+                const tokenAmount = ethers.formatUnits(swapAmount, fromToken.decimals || 18);
+                return formatCompactToken(tokenAmount, fromToken.symbol);
+            } catch { return null; }
+        } else {
+            if (swapQuote?.priceRoute?.srcUSD) return formatUSD(parseFloat(swapQuote.priceRoute.srcUSD));
+            const rawPrice = parseFloat(fromToken.priceInUSD || '0');
+            const price = rawPrice > 1_000_000_000 ? rawPrice / 1e8 : rawPrice;
+            return formatUSD(parseFloat(inputValue || '0') * price);
+        }
+    }, [isUSDMode, fromToken, swapAmount, swapQuote, inputValue]);
+
+    const toSecondaryValue = useMemo(() => {
+        if (!toToken) return null;
+        if (swapQuote?.priceRoute?.destUSD) return formatUSD(parseFloat(swapQuote.priceRoute.destUSD));
+        const rawPrice = parseFloat(toToken.priceInUSD || '0');
+        const price = rawPrice > 1_000_000_000 ? rawPrice / 1e8 : rawPrice;
+        if (swapQuote?.destAmount) {
+            try {
+                const tokenAmount = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18));
+                return formatUSD(tokenAmount * price);
+            } catch { return null; }
+        }
+        return null;
+    }, [toToken, swapQuote]);
 
     const renderTokenStatus = (token: any) => {
         const reasons = [];
         let disabled = false;
 
-        if (token.isFrozen) {
-            reasons.push('Frozen'); disabled = true;
-        }
-
-        if (token.isPaused) {
-            reasons.push('Paused'); disabled = true;
-        }
-
-        if (token.isActive === false) {
-            reasons.push('Inactive'); disabled = true;
-        }
-
         const tokenAddr = (token.address || token.underlyingAsset || '').toLowerCase();
+
+        // For 'Swap From': show the supply position balance, hide 'Inactive' for active positions
+        if (selectingForFrom) {
+            const supplyPos = activeSupplies.find(p => (p.address || p.underlyingAsset || '').toLowerCase() === tokenAddr);
+            if (supplyPos) {
+                reasons.push(`${supplyPos.formattedAmount || supplyPos.formattedBalance || ''} ${token.symbol} position`);
+            } else {
+                // Not a position the user holds — apply standard checks
+                if (token.isFrozen) { reasons.push('Frozen'); disabled = true; }
+                if (token.isPaused) { reasons.push('Paused'); disabled = true; }
+                if (token.isActive === false) { reasons.push('Inactive'); disabled = true; }
+            }
+        } else {
+            if (token.isFrozen) { reasons.push('Frozen'); disabled = true; }
+            if (token.isPaused) { reasons.push('Paused'); disabled = true; }
+            if (token.isActive === false) { reasons.push('Inactive'); disabled = true; }
+        }
 
         // Block selecting the same token
         if (selectingForFrom) {
@@ -299,7 +295,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
             reasons.push('Checking availability...');
         }
 
-        return { disabled, reasons };
+        return { disabled, reasons: reasons.filter(Boolean) };
     };
 
     const selectorTokens = selectingForFrom
@@ -743,31 +739,70 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                 <CompactAmountInput
                     token={fromToken}
                     value={inputValue}
+                    isUSDMode={isUSDMode}
+                    onToggleUSDMode={handleToggleUSDMode}
+                    secondaryValue={fromSecondaryValue}
+                    isError={isInsufficientBalance}
                     onChange={(val) => {
                         const normalized = normalizeDecimalInput(val);
                         setInputValue(normalized);
 
                         try {
-                            if (!normalized) {
+                            if (!normalized || normalized === '.' || parseFloat(normalized) === 0) {
                                 setSwapAmount(BigInt(0));
-                            } else {
-                                const parsable = normalized.endsWith('.') ? `${normalized.slice(0, -1) || '0'}` : normalized;
-                                const parsed = ethers.parseUnits(parsable, fromToken?.decimals || 18);
-                                const capped = parsed > availableBalance ? availableBalance : parsed;
-                                setSwapAmount(capped);
+                                return;
                             }
+
+                            let amountBI: bigint;
+
+                            if (isUSDMode) {
+                                const price = parseFloat(fromToken?.priceInUSD || '0');
+                                if (price > 0) {
+                                    const tokenAmountNum = parseFloat(normalized) / price;
+                                    amountBI = ethers.parseUnits(tokenAmountNum.toFixed(fromToken?.decimals || 18), fromToken?.decimals || 18);
+                                } else {
+                                    amountBI = BigInt(0);
+                                }
+                            } else {
+                                amountBI = ethers.parseUnits(normalized, fromToken.decimals || 18);
+                            }
+
+                            // NO CAPPING — allow above-balance quoting
+                            setSwapAmount(amountBI);
                         } catch {
                             // Ignore invalid partial decimal input while typing.
                         }
                     }}
+                    onApplyMax={() => {
+                        if (!availableBalance || availableBalance === BigInt(0)) return;
+                        const maxTokenAmount = ethers.formatUnits(availableBalance, fromToken.decimals || 18);
+                        if (isUSDMode) {
+                            const price = parseFloat(fromToken.priceInUSD || '0');
+                            setInputValue((parseFloat(maxTokenAmount) * price).toFixed(2));
+                        } else {
+                            setInputValue(maxTokenAmount);
+                        }
+                        setSwapAmount(availableBalance);
+                    }}
+                    onApplyPct={(pct) => {
+                        if (!availableBalance || availableBalance === BigInt(0)) return;
+                        const amountBI = (availableBalance * BigInt(pct)) / BigInt(100);
+                        const tokenAmount = ethers.formatUnits(amountBI, fromToken.decimals || 18);
+                        if (isUSDMode) {
+                            const price = parseFloat(fromToken.priceInUSD || '0');
+                            setInputValue((parseFloat(tokenAmount) * price).toFixed(2));
+                        } else {
+                            setInputValue(tokenAmount);
+                        }
+                        setSwapAmount(amountBI);
+                    }}
                     maxAmount={availableBalance}
-                    decimals={fromToken?.decimals || 18}
+                    decimals={isUSDMode ? 2 : (fromToken?.decimals || 18)}
                     formattedBalance={formattedBalance}
                     onTokenSelect={() => {
                         setSelectingForFrom(true);
                         setTokenSelectorOpen(true);
                     }}
-                    usdValue={fromToken && inputValue ? formatUSD(parseFloat(inputValue) * parseFloat(fromToken.priceInUSD || '0')) : null}
                     displaySymbol={fromToken ? getDisplaySymbol(fromToken, localMarketAssets) : undefined}
                     disabled={isActionLoading}
                 />
@@ -813,9 +848,13 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                 </div>
                             ) : swapQuote && toToken && fromToken ? (
                                 <div className="flex items-center gap-2 overflow-hidden">
-                                    <span className="text-2xl font-mono font-bold text-slate-900 dark:text-white block py-0.5 truncate leading-none overflow-hidden text-ellipsis whitespace-nowrap">
-                                        {ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18)}
-                                    </span>
+                                    <input
+                                        type="text"
+                                        readOnly
+                                        value={ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18)}
+                                        className="text-2xl font-mono font-bold bg-transparent border-none text-slate-900 dark:text-white block w-full py-0.5 leading-none focus:outline-none cursor-text select-all"
+                                    />
+
                                 </div>
                             ) : (
                                 <div className="text-slate-500 text-sm py-1.5 min-h-7 flex items-center">
@@ -857,15 +896,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                     {/* Bottom Row: USD Value */}
                     <div className="flex items-center justify-between mt-0 pl-1.5">
                         <div className="text-xs text-slate-500 block min-h-4">
-                            {swapQuote && toToken && (
-                                <span>
-                                    {(() => {
-                                        const amount = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18));
-
-                                        return `~ ${formatUSD(amount * parseFloat(toToken.priceInUSD || '0'))}`;
-                                    })()}
-                                </span>
-                            )}
+                            {toSecondaryValue && <span>{toSecondaryValue}</span>}
                         </div>
                     </div>
                 </div>
@@ -889,16 +920,16 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
                                         if (inputF > 0 && outputF > 0) {
                                             if (invertRate) {
-                                                return (inputF / outputF).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets);
+                                                return (inputF / outputF).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets);
                                             } else {
-                                                return (outputF / inputF).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
+                                               return (outputF / inputF).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
                                             }
                                         }
                                     }
 
                                     return invertRate
-                                        ? (parseFloat(toToken.priceInUSD) / parseFloat(fromToken.priceInUSD)).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets)
-                                        : (parseFloat(fromToken.priceInUSD) / parseFloat(toToken.priceInUSD)).toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
+                                        ? (parseFloat(toToken.priceInUSD) / parseFloat(fromToken.priceInUSD)).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(fromToken, localMarketAssets)
+                                        : (parseFloat(fromToken.priceInUSD) / parseFloat(toToken.priceInUSD)).toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' ' + getDisplaySymbol(toToken, localMarketAssets);
                                 })()}
                             </span>
                         </button>
@@ -1016,7 +1047,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                         return 'Service Fee (--)';
                                                     }
 
-                                                    return `Service Fee (${(feeBps / 100).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 })}%)`;
+                                                    return `Service Fee (${(feeBps / 100).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}%)`;
                                                 })()}
                                             </span>
                                             {swapQuote?.discountPercent > 0 && (
@@ -1045,7 +1076,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                     const amount = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18));
                                                     const fee = amount * (feeBps / 10000);
 
-                                                    return fee < 0.00001 ? '< 0.00001' : fee.toLocaleString(undefined, { maximumFractionDigits: 6 });
+                                                    return fee < 0.00001 ? '< 0.00001' : fee.toLocaleString('en-US', { maximumFractionDigits: 6 });
                                                 })()}
                                             </span>
                                         </div>
@@ -1133,15 +1164,15 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                 return 'text-red-500';
                                             };
 
-                                            const formatHf = (hf: number) => hf === -1 ? <span className="text-lg leading-none">∞</span> : hf.toFixed(2);
-
                                             return (
                                                 <div className="flex flex-col items-end">
                                                     <div className="flex items-center gap-1.5 font-bold">
-                                                        <span className={getHfColor(currentHf)}>{formatHf(currentHf)}</span>
+                                                        <span className={getHfColor(currentHf)}>{formatHF(currentHf)}</span>
                                                         <span className="text-slate-400 font-normal">→</span>
                                                         <InfoTooltip content="Liquidation < 1.0" size={12}>
-                                                            <span className={getHfColor(simulatedHf)}>{formatHf(simulatedHf)}</span>
+                                                            <span className={isInsufficientBalance ? 'text-slate-400 font-normal' : getHfColor(simulatedHf)}>
+                                                                {isInsufficientBalance ? '—' : formatHF(simulatedHf)}
+                                                            </span>
                                                         </InfoTooltip>
                                                     </div>
                                                 </div>
@@ -1191,8 +1222,8 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                         <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
                                                             <span>{formatUSD(currentTotalCollateralUSD)}</span>
                                                             <span className="text-slate-400 font-normal">→</span>
-                                                            <span className={simulatedTotalCollateralUSD > currentTotalCollateralUSD ? 'text-emerald-500' : simulatedTotalCollateralUSD < currentTotalCollateralUSD ? 'text-amber-500 font-bold' : 'text-slate-900 dark:text-slate-100'}>
-                                                                {formatUSD(simulatedTotalCollateralUSD)}
+                                                            <span className={isInsufficientBalance ? 'text-slate-400 font-normal' : (simulatedTotalCollateralUSD > currentTotalCollateralUSD ? 'text-emerald-500' : simulatedTotalCollateralUSD < currentTotalCollateralUSD ? 'text-amber-500 font-bold' : 'text-slate-900 dark:text-slate-100')}>
+                                                                {isInsufficientBalance ? '—' : formatUSD(simulatedTotalCollateralUSD)}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -1220,9 +1251,9 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
                                             return (
                                                 <>
-                                                    <span className="text-slate-900 dark:text-slate-100">{currentApy < 0.01 ? '< 0.01' : currentApy.toFixed(2)}%</span>
+                                                    <span className="text-slate-900 dark:text-slate-100">{formatAPY(currentApy)}</span>
                                                     <span className="text-slate-400 font-normal">→</span>
-                                                    <span className="text-slate-900 dark:text-slate-100">{newApy < 0.01 ? '< 0.01' : newApy.toFixed(2)}%</span>
+                                                    <span className="text-slate-900 dark:text-slate-100">{formatAPY(newApy)}</span>
                                                 </>
                                             );
                                         })()}
@@ -1337,14 +1368,14 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                         <div className="w-4 h-4 rounded-full overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700">
                                                             <img src={getTokenLogo(fromToken.symbol)} className="w-full h-full object-cover" />
                                                         </div>
-                                                        <span>{fromRemaining === 0 ? '0' : (fromRemaining >= 1000 ? (fromRemaining / 1000).toFixed(2) + 'K' : fromRemaining.toLocaleString(undefined, { maximumFractionDigits: 6 }))}</span>
+                                                        <span>{fromRemaining === 0 ? '0' : (fromRemaining >= 1000 ? (fromRemaining / 1000).toFixed(2) + 'K' : fromRemaining.toLocaleString('en-US', { maximumFractionDigits: 6 }))}</span>
                                                     </div>
                                                     <span className="text-slate-400 font-normal">→</span>
                                                     <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100">
                                                         <div className="w-4 h-4 rounded-full overflow-hidden flex items-center justify-center border border-slate-200 dark:border-slate-700">
                                                             <img src={getTokenLogo(toToken.symbol)} className="w-full h-full object-cover" />
                                                         </div>
-                                                        <span>{toTotal === 0 ? '0' : (toTotal >= 1000 ? (toTotal / 1000).toFixed(2) + 'K' : toTotal.toLocaleString(undefined, { maximumFractionDigits: 6 }))}</span>
+                                                        <span>{toTotal === 0 ? '0' : (toTotal >= 1000 ? (toTotal / 1000).toFixed(2) + 'K' : toTotal.toLocaleString('en-US', { maximumFractionDigits: 6 }))}</span>
                                                     </div>
                                                 </>
                                             );
@@ -1413,7 +1444,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                         });
                     }
 
-                    if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0) {
+                    if (simulatedHf !== -1 && simulatedHf < 1.05 && currentTotalBorrowsUSD > 0 && !isInsufficientBalance) {
                         alerts.push({
                             label: 'Danger:',
                             message: `This swap will leave your Health Factor very low (${simulatedHf.toFixed(2)}).`,
@@ -1505,15 +1536,17 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
                 {/* Swap Button */}
                 <Button
-                    disabled={isActionLoading || !swapQuote || swapAmount === BigInt(0)}
+                    disabled={isActionLoading || !swapQuote || swapAmount === BigInt(0) || isInsufficientBalance}
                     onClick={handleSwap}
-                    className="w-full py-3 h-auto font-bold rounded-xl"
+                    className={`w-full py-3 h-auto font-bold rounded-xl mt-2 ${isInsufficientBalance ? 'bg-rose-500 hover:bg-rose-600 border-rose-600 text-white' : ''}`}
                 >
                     {isActionLoading ? (
                         <>
                             <RefreshCw className="w-4 h-4 animate-spin" />
                             {isSigning ? 'Confirm in Wallet...' : 'Swapping...'}
                         </>
+                    ) : isInsufficientBalance ? (
+                        'Insufficient Balance'
                     ) : (
                         <>
                             <ArrowRightLeft className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />

@@ -33,12 +33,12 @@ const AppFooter: React.FC = () => {
                     <span className="text-slate-300 dark:text-slate-700">·</span>
 
                     <a
-                        href="https://lilswap.xyz/docs"
+                        href="https://lilswap.xyz/"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors font-medium"
                     >
-                        Docs
+                        Website
                     </a>
 
                     <a

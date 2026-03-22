@@ -290,6 +290,13 @@ export const useCollateralSwapActions = ({
         clearQuoteError?.();
         setUserRejected(false);
 
+        if (supplyBalance !== null && swapAmount > supplyBalance) {
+            addLog?.('Insufficient balance to perform this swap.', 'error');
+            setTxError('Insufficient balance');
+
+            return;
+        }
+
         if (!adapterAddress) {
             addLog?.(`Invalid COLLATERAL_ADAPTER for ${targetNetwork.label}.`, 'error');
 

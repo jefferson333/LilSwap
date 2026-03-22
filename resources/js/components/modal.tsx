@@ -31,6 +31,16 @@ export const Modal: React.FC<ModalProps> = ({
                 className="sm:max-w-[calc(100vw-2rem)] p-0 gap-0 overflow-hidden bg-white dark:bg-slate-900 border border-border-light dark:border-slate-700 rounded-2xl shadow-2xl animate-in zoom-in-95 fade-in duration-200" 
                 style={{ maxWidth }}
                 aria-describedby={undefined}
+                onPointerDownOutside={(e) => {
+                    if (e.target instanceof Element && (e.target.closest('.lilswap-toast') || e.target.closest('.lilswap-toast-container'))) {
+                        e.preventDefault();
+                    }
+                }}
+                onInteractOutside={(e) => {
+                    if (e.target instanceof Element && (e.target.closest('.lilswap-toast') || e.target.closest('.lilswap-toast-container'))) {
+                        e.preventDefault();
+                    }
+                }}
             >
                 <DialogDescription className="sr-only">
                     {typeof title === 'string' ? `${title} dialog` : 'Modal dialog'}

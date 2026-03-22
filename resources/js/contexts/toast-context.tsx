@@ -49,7 +49,7 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         <ToastContext.Provider value={{ addToast, removeToast }}>
             {children}
             {typeof document !== 'undefined' && createPortal(
-                <div className="fixed bottom-6 right-6 z-9999 flex flex-col-reverse gap-2 pointer-events-none">
+                <div className="lilswap-toast-container fixed bottom-6 right-6 z-9999 flex flex-col-reverse gap-2 pointer-events-none">
                     {toasts.map(toast => (
                         <ToastComponent key={toast.id} toast={toast} onRemove={removeToast} />
                     ))}
@@ -91,7 +91,8 @@ const ToastComponent: React.FC<{ toast: Toast; onRemove: (id: number) => void }>
             onMouseLeave={() => setIsHovered(false)}
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
-            className={`pointer-events-auto flex items-start gap-3 p-4 rounded-xl border shadow-xl backdrop-blur-md transition-all duration-300 w-80
+            onPointerDown={(e) => e.stopPropagation()}
+            className={`lilswap-toast pointer-events-auto flex items-start gap-3 p-4 rounded-xl border shadow-xl backdrop-blur-md transition-all duration-300 w-80
                 ${toast.isLeaving ? 'opacity-0 translate-x-8' : 'animate-in slide-in-from-right-8 fade-in'}
                 ${bgColors[toast.type] || bgColors.info}
             `}

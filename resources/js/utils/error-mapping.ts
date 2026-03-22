@@ -26,6 +26,15 @@ const ERROR_MAP: Record<string, ErrorConfig> = {
     '0x850c6f76': {
         en: 'Slippage too high. Try a smaller amount or adjust settings.'
     },
+    '0xcea9e31d': {
+        en: 'Slippage too high or transaction failed simulation. Please try increasing slippage or check your balance.'
+    },
+    '0xCEA9E31D': {
+        en: 'Slippage too high or transaction failed simulation. Please try increasing slippage or check your balance.'
+    },
+    '0x1f00bfd0': {
+        en: 'Price impact too high. Try a smaller amount.'
+    },
     'OVERFLOW': {
         en: 'Calculation error (Overflow). Try a different amount.'
     },
@@ -80,12 +89,19 @@ const ERROR_MAP: Record<string, ErrorConfig> = {
  */
 export const mapErrorToUserFriendly = (technicalMessage: string | null | undefined, locale: 'en' | 'pt' = 'en'): string | null => {
     if (!technicalMessage) {
-return null;
-}
+        return null;
+    }
+
+    const technicalMessageLower = String(technicalMessage).toLowerCase().trim();
+    
+    // Explicit hardcoded match for the slippage error code
+    if (technicalMessageLower.includes('0xcea9e31d')) {
+        return 'Slippage too high or transaction failed simulation. Please try increasing slippage or check your balance.';
+    }
 
     // Check for direct matches in ERROR_MAP
     for (const [key, pair] of Object.entries(ERROR_MAP)) {
-        if (technicalMessage.includes(key)) {
+        if (technicalMessageLower.includes(key.toLowerCase())) {
             return pair[locale as keyof ErrorConfig] || pair.en;
         }
     }
