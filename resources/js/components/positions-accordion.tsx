@@ -11,56 +11,13 @@ import { DonateModal } from './donate-modal';
 import { InfoTooltip } from './info-tooltip';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
+import { formatUSD, formatCompactNumber, formatCompactToken, formatAPY, formatHF } from '../utils/formatters';
 
 // Lazy load Swap Modals - Note: We'll migrate these next
 const DebtSwapModal = lazy(() => import('./debt-swap-modal').then(module => ({ default: module.DebtSwapModal })));
 const CollateralSwapModal = lazy(() => import('./collateral-swap-modal').then(module => ({ default: module.CollateralSwapModal })));
 
-// Formatting helpers
-const formatUSD = (value: number) => {
-    if (value === 0) {
-        return '$0.00';
-    }
-
-    if (value < 0.01) {
-        return '< $0.01';
-    }
-
-    return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-};
-
-const formatCompactUSD = (value: number) => {
-    if (value === 0) {
-        return '$0';
-    }
-
-    if (value < 1000) {
-        return formatUSD(value);
-    }
-
-    return new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: 'USD',
-        notation: 'compact',
-        maximumFractionDigits: 2
-    }).format(value);
-};
-
-const formatTokenAmount = (amount: number, symbol: string) => {
-    if (amount === 0) {
-        return `0 ${symbol}`;
-    }
-
-    if (amount < 0.0000001) {
-        return `< 0.0000001 ${symbol}`;
-    }
-
-    if (amount < 0.1) {
-        return `${Number(amount.toFixed(7)).toString()} ${symbol}`;
-    }
-
-    return `${Number(amount.toFixed(4)).toString()} ${symbol}`;
-};
+// Formatting helpers removed in favor of centralized ones in ../utils/formatters.ts
 
 interface ModalState {
     open: boolean;
@@ -407,19 +364,19 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                 <div className="flex flex-col items-start">
                                     <span className="text-[11px] sm:text-xs text-slate-400 mb-0.5">Net worth</span>
                                     <span className="text-base font-mono font-bold text-slate-900 dark:text-white leading-none mt-1">
-                                        {formatCompactUSD(chain.netWorthUSD)}
+                                        {formatUSD(chain.netWorthUSD)}
                                     </span>
                                 </div>
                                 <div className="flex flex-col items-start">
                                     <span className="text-[11px] sm:text-xs text-slate-400 mb-0.5">Net APY</span>
                                     <span className="text-base font-mono font-bold text-slate-900 dark:text-white leading-none mt-1">
-                                        {chain.netAPY.toFixed(2)}%
+                                        {formatAPY(chain.netAPY)}
                                     </span>
                                 </div>
                                 <div className="flex flex-col items-start">
                                     <span className="text-[11px] sm:text-xs text-slate-400 mb-0.5">Health factor</span>
                                     <span className={`text-lg font-mono font-bold leading-none mt-1 ${(!chain.healthFactor || chain.healthFactor >= 3 || chain.healthFactor === -1) ? 'text-green-400' : chain.healthFactor >= 1.1 ? 'text-orange-400' : 'text-red-500'}`}>
-                                        {(!chain.healthFactor || chain.healthFactor === -1) ? '∞' : chain.healthFactor.toFixed(2)}
+                                        {formatHF(chain.healthFactor)}
                                     </span>
                                 </div>
                             </div>
@@ -444,10 +401,10 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                             <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
                                                                 <img src={getTokenLogo(supply.symbol)} alt={supply.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(supply.symbol)(e as any)} />
                                                             </div>
-                                                            <div className="min-w-0">
-                                                                <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(supply.formattedAmount) * parseFloat(supply.priceInUSD || '0'))}</div>
-                                                                <div className="text-[10px] text-slate-500 font-medium truncate">{formatTokenAmount(parseFloat(supply.formattedAmount), supply.symbol)}</div>
-                                                            </div>
+                                                                 <div className="min-w-0">
+                                                                        <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(supply.formattedAmount) * parseFloat(supply.priceInUSD || '0'))}</div>
+                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(supply.formattedAmount, supply.symbol)}</div>
+                                                                    </div>
                                                         </div>
                                                         <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, supply, chain.marketAssets, [], chain.supplies, true)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
                                                             <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
@@ -469,9 +426,9 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                                 <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
                                                                     <img src={getTokenLogo(borrow.symbol)} alt={borrow.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(borrow.symbol)(e as any)} />
                                                                 </div>
-                                                                <div className="min-w-0">
+                                                                 <div className="min-w-0">
                                                                     <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(borrow.formattedAmount) * parseFloat(borrow.priceInUSD || '0'))}</div>
-                                                                    <div className="text-[10px] text-slate-500 font-medium truncate">{formatTokenAmount(parseFloat(borrow.formattedAmount), borrow.symbol)}</div>
+                                                                    <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(borrow.formattedAmount, borrow.symbol)}</div>
                                                                 </div>
                                                             </div>
                                                             <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, borrow, chain.marketAssets, chain.borrows, [], false)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
@@ -509,7 +466,7 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                                     </div>
                                                                     <div className="min-w-0">
                                                                         <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(supply.formattedAmount) * parseFloat(supply.priceInUSD || '0'))}</div>
-                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatTokenAmount(parseFloat(supply.formattedAmount), supply.symbol)}</div>
+                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(supply.formattedAmount), supply.symbol)}</div>
                                                                     </div>
                                                                 </div>
                                                                 <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, supply, chain.marketAssets, [], chain.supplies, true)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
@@ -532,7 +489,7 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                                     </div>
                                                                     <div className="min-w-0">
                                                                         <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(borrow.formattedAmount) * parseFloat(borrow.priceInUSD || '0'))}</div>
-                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatTokenAmount(parseFloat(borrow.formattedAmount), borrow.symbol)}</div>
+                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(borrow.formattedAmount), borrow.symbol)}</div>
                                                                     </div>
                                                                 </div>
                                                                 <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, borrow, chain.marketAssets, chain.borrows, [], false)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
@@ -540,7 +497,7 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                                 </Button>
                                                             </div>
                                                         ) : isNoBorrowRow ? (
-                                                            <div className="flex items-center justify-center h-full min-h-[44px] text-sm text-slate-400 italic opacity-80 px-1 w-full">
+                                                            <div className="flex items-center justify-center h-full min-h-11 text-sm text-slate-400 italic opacity-80 px-1 w-full">
                                                                 No borrow positions
                                                             </div>
                                                         ) : (

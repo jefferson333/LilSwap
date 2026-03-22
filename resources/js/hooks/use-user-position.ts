@@ -10,27 +10,40 @@ export interface UserPositionData {
     summary: any | null;
 }
 
+const CACHE_TTL = 60000; // 60 seconds cache
+const DEBOUNCE_DELAY = 150; // shorter debounce for snappier modal interactions
+
+const cacheRef = {
+    current: {
+        data: null as UserPositionData | null,
+        timestamp: 0,
+        key: ''
+    }
+};
+
 /**
  * Hook to fetch and manage user's aggregated Aave position
  * @returns {Object} { supplies, borrows, summary, marketAssets, loading, error, refresh }
  */
 export const useUserPosition = () => {
     const { account, selectedNetwork } = useWeb3();
-    const [data, setData] = useState<UserPositionData>({ supplies: [], borrows: [], marketAssets: [], summary: null });
+
+    const cacheKey = account && selectedNetwork?.chainId ? `${account}-${selectedNetwork.chainId}` : '';
+
+    const getInitialData = () => {
+        if (cacheKey && cacheRef.current.key === cacheKey && cacheRef.current.data) {
+            return cacheRef.current.data;
+        }
+        return { supplies: [], borrows: [], marketAssets: [], summary: null };
+    };
+
+    const [data, setData] = useState<UserPositionData>(getInitialData);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [lastFetch, setLastFetch] = useState<number | null>(null);
 
-    const cacheRef = useRef<{ data: UserPositionData | null; timestamp: number; key: string }>({
-        data: null,
-        timestamp: 0,
-        key: ''
-    });
     const fetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevAddressRef = useRef<string | null>(account);
-
-    const CACHE_TTL = 60000; // 60 seconds cache
-    const DEBOUNCE_DELAY = 150; // shorter debounce for snappier modal interactions
 
     const refresh = useCallback(async (force = false) => {
         if (!account || !selectedNetwork?.chainId) {
