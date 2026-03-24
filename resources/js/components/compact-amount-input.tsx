@@ -1,5 +1,5 @@
 import { ChevronDown, X, ArrowUpDown } from 'lucide-react';
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { getTokenLogo, onTokenImgError } from '../utils/get-token-logo';
 import { normalizeDecimalInput } from '../utils/normalize-decimal-input';
 import { formatCompactNumber } from '../utils/formatters';
@@ -55,6 +55,23 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
     placeholder = '0.00',
 }) => {
     const [popoverOpen, setPopoverOpen] = useState(false);
+    const popoverRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
+                setPopoverOpen(false);
+            }
+        };
+
+        if (popoverOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [popoverOpen]);
 
 
 
@@ -91,7 +108,7 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
             <div className="flex items-center gap-2 sm:gap-3">
                 <div className="flex-1 relative overflow-hidden flex items-center pl-0.5 focus-within:z-10">
                     {isUSDMode && (
-                        <span className={`text-2xl font-mono font-bold mr-0.5 select-none ${isError ? 'text-rose-500' : 'text-slate-900 dark:text-white'}`}>$</span>
+                        <span className={`text-2xl font-mono font-bold mr-0.5 select-none transition-colors ${isError ? 'text-rose-500' : (value && value !== '0' ? 'text-slate-900 dark:text-white' : 'text-muted-foreground')}`}>$</span>
                     )}
                     <input
                         type="text"
@@ -150,22 +167,22 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
             {/* Single bottom row: $USD left | Balance % MAX right */}
             <div className="flex items-center justify-between mt-0 pl-0.5">
                 {/* Secondary value (USD or Token) - Toggle at the START */}
-                <div className="flex items-center gap-1 flex-1 min-h-5">
+                <button
+                    type="button"
+                    onClick={onToggleUSDMode}
+                    disabled={disabled || !onToggleUSDMode}
+                    className="flex items-center gap-1 flex-1 min-h-5 text-left group/label p-0 bg-transparent border-none appearance-none cursor-pointer disabled:cursor-not-allowed"
+                    title={isUSDMode ? "Switch to Token" : "Switch to USD"}
+                >
                     {onToggleUSDMode && token && (
-                        <button
-                            type="button"
-                            onClick={onToggleUSDMode}
-                            disabled={disabled}
-                            className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-all group-hover:opacity-100 opacity-60 -ml-1"
-                            title={isUSDMode ? "Switch to Token" : "Switch to USD"}
-                        >
+                        <div className="p-1 rounded-md group-hover/label:bg-slate-200 dark:group-hover/label:bg-slate-700 text-slate-400 group-hover/label:text-slate-600 dark:group-hover/label:text-slate-200 transition-all group-hover:opacity-100 opacity-60 -ml-1">
                             <ArrowUpDown className="w-2.5 h-2.5" />
-                        </button>
+                        </div>
                     )}
                     <span className={`text-xs font-medium transition-colors ${isError ? 'text-rose-400' : 'text-slate-700 dark:text-slate-300'}`}>
                         {secondaryValue || ''}
                     </span>
-                </div>
+                </button>
 
                 {/* Balance + % popover + MAX — hidden for read-only (destination) inputs */}
                 {!readOnly && (
@@ -173,7 +190,7 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
                         <span className="text-slate-500 font-medium whitespace-nowrap">Balance {formattedBalance ? formatCompactNumber(formattedBalance) : '0'}</span>
 
                         {/* % button + custom popover */}
-                        <div className="relative">
+                        <div className="relative" ref={popoverRef}>
                             <button
                                 type="button"
                                 className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white bg-transparent border-none p-0 m-0 cursor-pointer transition-colors disabled:opacity-50"
