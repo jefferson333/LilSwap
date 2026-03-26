@@ -97,7 +97,7 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
             <DialogContent
-                className="max-w-md max-h-[85vh] flex! flex-col! p-0 gap-0 border-border-light dark:border-slate-700 z-100"
+                className="max-w-md max-h-[85vh] flex! flex-col! p-0 gap-0 bg-white dark:bg-slate-900 border-border-light dark:border-slate-700 z-100 shadow-2xl rounded-2xl overflow-hidden"
                 hideOverlay={false}
                 overlayClassName="bg-transparent z-90"
                 onOpenAutoFocus={(e) => {
@@ -119,7 +119,7 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
                             placeholder={searchPlaceholder}
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
-                            className="pl-9 bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800"
+                            className="pl-9 bg-slate-50 dark:bg-slate-900/50 border-slate-200/60 dark:border-slate-800/60 focus:border-purple-500/50 transition-colors"
                         />
                     </div>
                 </div>
@@ -173,15 +173,15 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
                                             }
                                         }}
                                         aria-disabled={isDisabled}
-                                        className={`w-full flex items-center justify-between p-3 rounded-lg transition-colors text-left
+                                        className={`w-full flex items-center justify-between p-3 rounded-xl transition-all text-left group
                                             ${isDisabled
-                                                ? 'opacity-50 cursor-not-allowed bg-slate-50/50 dark:bg-slate-900/30'
-                                                : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+                                                ? 'opacity-40 cursor-not-allowed bg-slate-50/30 dark:bg-slate-900/20'
+                                                : 'hover:bg-slate-100/80 dark:hover:bg-slate-800/80 active:scale-[0.98]'
                                             }`}
                                         title={status.reasons.join(', ')}
                                     >
                                         <div className="flex items-center gap-3">
-                                            <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0">
+                                            <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800/50 flex items-center justify-center overflow-hidden border border-slate-200/50 dark:border-slate-700/50 shrink-0 group-hover:border-purple-200 dark:group-hover:border-purple-800/50 transition-colors">
                                                 <img
                                                     src={getTokenLogo(token.symbol)}
                                                     alt={token.symbol}
