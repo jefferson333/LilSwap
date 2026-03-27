@@ -159,6 +159,33 @@
     body {
         @apply bg-background text-foreground;
     }
+
+    /* Global Scrollbar */
+    *::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+
+    *::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+        background: #e2e8f0; /* slate-200 */
+        border-radius: 9999px;
+    }
+
+    .dark *::-webkit-scrollbar-thumb {
+        background: rgba(30, 41, 59, 0.6); /* slate-800/60 */
+    }
+
+    *::-webkit-scrollbar-thumb:hover {
+        background: #cbd5e1; /* slate-300 */
+    }
+
+    .dark *::-webkit-scrollbar-thumb:hover {
+        background: rgba(30, 41, 59, 0.8);
+    }
 }
 
 @layer utilities {

@@ -1,4 +1,4 @@
-import { AlertCircle, ArrowLeftRight, ChevronDown, ChevronUp, ExternalLink, Gift, Network, RefreshCw } from 'lucide-react';
+import { AlertCircle, ArrowDownLeft, ArrowUpRight, CircleDashed, ArrowLeftRight, ChevronDown, ChevronUp, ExternalLink, Gift, Network, RefreshCw } from 'lucide-react';
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useWeb3 } from '@/contexts/web3-context';
 import { getNetworkByChainId } from '../constants/networks';
@@ -326,7 +326,13 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                 Updated {getLastFetchText()}
                             </span>
                         )}
-                        <Button variant="ghost" size="icon" onClick={() => refresh(true)} disabled={loading} className="h-8 w-8 text-slate-400 hover:text-white">
+                        <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => refresh(true)} 
+                            disabled={loading} 
+                            className="h-8 w-8 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-transparent transition-all group"
+                        >
                             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                         </Button>
                     </div>
@@ -388,14 +394,17 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                     </div>
 
                     {openChain === chain.chainId && (
-                        <div className="border-t border-border-light dark:border-border-dark px-4 pt-4 pb-0 bg-slate-50 dark:bg-slate-900/15 flex flex-col md:flex-row gap-6">
+                        <div className="border-t border-border-light dark:border-border-dark px-4 pt-4 pb-0 bg-slate-50/80 dark:bg-slate-950/40 flex flex-col md:flex-row gap-6 transition-colors duration-300">
                             <div className="w-full">
                                 <div className="md:hidden space-y-4">
                                     <div>
-                                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">Supplies</h4>
+                                        <div className="flex items-center gap-2 mb-2 ml-1">
+                                            <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                                            <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest leading-none">Supplies</h4>
+                                        </div>
                                         <div className="-mx-4 border-x border-t border-slate-200 dark:border-slate-700/80 divide-y divide-slate-200 dark:divide-slate-700/80">
                                             {chain.supplies.map((supply) => (
-                                                <div key={`mobile-supply-${supply.underlyingAsset}`} className="px-4 py-2.5 bg-white dark:bg-slate-800/60">
+                                                <div key={`mobile-supply-${supply.underlyingAsset}`} className="px-4 py-2.5 bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors duration-200">
                                                     <div className="flex items-center justify-between gap-3">
                                                         <div className="flex items-center gap-3 min-w-0">
                                                             <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
@@ -417,10 +426,13 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
 
                                     {chain.borrows.length > 0 && (
                                         <div>
-                                            <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 px-1">Borrows</h4>
+                                            <div className="flex items-center gap-2 mb-2 ml-1">
+                                                <ArrowDownLeft className="w-3 h-3 text-primary" />
+                                                <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest leading-none">Borrows</h4>
+                                            </div>
                                             <div className="-mx-4 border-x border-t border-slate-200 dark:border-slate-700/80 divide-y divide-slate-200 dark:divide-slate-700/80">
                                                 {chain.borrows.map((borrow) => (
-                                                    <div key={`mobile-borrow-${borrow.underlyingAsset}`} className="px-4 py-2.5 bg-white dark:bg-slate-800/60">
+                                                    <div key={`mobile-borrow-${borrow.underlyingAsset}`} className="px-4 py-2.5 bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors duration-200">
                                                         <div className="flex items-center justify-between gap-3">
                                                             <div className="flex items-center gap-3 min-w-0">
                                                                 <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
@@ -443,71 +455,103 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                 </div>
 
                                 <div className="hidden md:block">
-                                    <div className="grid grid-cols-2 gap-6 mb-3 px-1">
-                                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Supplies</h4>
-                                        <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Borrows</h4>
+                                    <div className="grid grid-cols-2 gap-6 mb-3">
+                                        <div className="flex items-center gap-2 px-1">
+                                            <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                                            <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Supplies</h4>
+                                        </div>
+                                        <div className="flex items-center gap-2 px-1">
+                                            <ArrowDownLeft className="w-3 h-3 text-primary" />
+                                            <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Borrows</h4>
+                                        </div>
                                     </div>
-                                    <div className="-mx-4 border-x border-slate-200 dark:border-slate-700/80">
-                                        {Array.from({ length: Math.max(chain.supplies.length, chain.borrows.length, 1) }).map((_, index) => {
-                                            const supply = chain.supplies[index] || null;
-                                            const borrow = chain.borrows[index] || null;
-                                            const isNoBorrowRow = chain.borrows.length === 0 && index === 0;
-                                            const isFirstRow = index === 0;
-                                            const isLastRow = index === Math.max(chain.supplies.length, chain.borrows.length, 1) - 1;
+                                    {(() => {
+                                        const maxLen = Math.max(chain.supplies.length, chain.borrows.length, 1);
 
-                                            return (
-                                                <div key={`${chain.chainId}-position-row-${index}`} className={`grid grid-cols-[1fr_auto_1fr] items-stretch ${isFirstRow ? 'border-t border-slate-200 dark:border-slate-700/80' : ''}`}>
-                                                    <div className={`px-4 py-2.5 transition-colors duration-300 ${supply ? 'bg-white dark:bg-slate-800/60' : ''} ${supply && !isLastRow ? 'border-b border-slate-200 dark:border-slate-700/80' : ''}`}>
-                                                        {supply ? (
-                                                            <div className="flex items-center justify-between gap-3">
-                                                                <div className="flex items-center gap-3 min-w-0">
-                                                                    <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
-                                                                        <img src={getTokenLogo(supply.symbol)} alt={supply.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(supply.symbol)(e as any)} />
+                                        return (
+                                            <div className="grid grid-cols-[1fr_auto_1fr] -mx-4 border-x border-t border-b border-slate-200 dark:border-slate-700/80 bg-white dark:bg-[#131d2f] transition-colors duration-200">
+                                                {/* Supplies Column */}
+                                                <div className="flex flex-col">
+                                                    {chain.supplies.map((supply, index) => {
+                                                        const isAtBottom = index === maxLen - 1;
+
+                                                        return (
+                                                            <div key={`${chain.chainId}-supply-${index}`} className={`px-4 py-2.5 transition-colors duration-300 hover:bg-slate-50 dark:hover:bg-slate-700/40 ${!isAtBottom ? 'border-b border-slate-200 dark:border-slate-700/80' : ''}`}>
+                                                                <div className="flex items-center justify-between gap-3">
+                                                                    <div className="flex items-center gap-3 min-w-0">
+                                                                        <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
+                                                                            <img src={getTokenLogo(supply.symbol)} alt={supply.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(supply.symbol)(e as any)} />
+                                                                        </div>
+                                                                        <div className="min-w-0">
+                                                                            <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(supply.formattedAmount) * parseFloat(supply.priceInUSD || '0'))}</div>
+                                                                            <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(supply.formattedAmount), supply.symbol)}</div>
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="min-w-0">
-                                                                        <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(supply.formattedAmount) * parseFloat(supply.priceInUSD || '0'))}</div>
-                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(supply.formattedAmount), supply.symbol)}</div>
-                                                                    </div>
+                                                                    <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, supply, chain.marketAssets, [], chain.supplies, true)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
+                                                                        <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
+                                                                    </Button>
                                                                 </div>
-                                                                <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, supply, chain.marketAssets, [], chain.supplies, true)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
-                                                                    <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
-                                                                </Button>
                                                             </div>
-                                                        ) : (
-                                                            <div className="h-9" />
-                                                        )}
-                                                    </div>
-
-                                                    <div className={`w-px self-stretch ${(supply || borrow) ? 'bg-slate-200/60 dark:bg-slate-600/40' : 'bg-transparent'}`} />
-
-                                                    <div className={`px-4 py-2.5 transition-colors duration-300 ${borrow ? 'bg-white dark:bg-slate-800/60' : ''} ${borrow && !isLastRow ? 'border-b border-slate-200 dark:border-slate-700/80' : ''}`}>
-                                                        {borrow ? (
-                                                            <div className="flex items-center justify-between gap-3">
-                                                                <div className="flex items-center gap-3 min-w-0">
-                                                                    <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
-                                                                        <img src={getTokenLogo(borrow.symbol)} alt={borrow.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(borrow.symbol)(e as any)} />
-                                                                    </div>
-                                                                    <div className="min-w-0">
-                                                                        <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(borrow.formattedAmount) * parseFloat(borrow.priceInUSD || '0'))}</div>
-                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(borrow.formattedAmount), borrow.symbol)}</div>
-                                                                    </div>
-                                                                </div>
-                                                                <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, borrow, chain.marketAssets, chain.borrows, [], false)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
-                                                                    <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
-                                                                </Button>
-                                                            </div>
-                                                        ) : isNoBorrowRow ? (
-                                                            <div className="flex items-center justify-center h-full min-h-11 text-sm text-slate-400 italic opacity-80 px-1 w-full">
-                                                                No borrow positions
-                                                            </div>
-                                                        ) : (
-                                                            <div className="h-9" />
-                                                        )}
-                                                    </div>
+                                                        );
+                                                    })}
+                                                    {/* Fill space if borrows column is taller */}
+                                                    {chain.supplies.length < chain.borrows.length && (
+                                                        <div className="flex-1" />
+                                                    )}
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
+
+                                                {/* Row Divider */}
+                                                <div className="w-px self-stretch bg-slate-200/60 dark:bg-slate-600/40" />
+
+                                                {/* Borrows Column */}
+                                                <div className="flex flex-col">
+                                                    {chain.borrows.length > 0 ? (
+                                                        chain.borrows.map((borrow, index) => {
+                                                            const isAtBottom = index === maxLen - 1;
+
+                                                            return (
+                                                                <div key={`${chain.chainId}-borrow-${index}`} className={`px-4 py-2.5 transition-colors duration-300 hover:bg-slate-50 dark:hover:bg-slate-700/40 ${!isAtBottom ? 'border-b border-slate-200 dark:border-slate-700/80' : ''}`}>
+                                                                    <div className="flex items-center justify-between gap-3">
+                                                                        <div className="flex items-center gap-3 min-w-0">
+                                                                            <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
+                                                                                <img src={getTokenLogo(borrow.symbol)} alt={borrow.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(borrow.symbol)(e as any)} />
+                                                                            </div>
+                                                                            <div className="min-w-0">
+                                                                                <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(borrow.formattedAmount) * parseFloat(borrow.priceInUSD || '0'))}</div>
+                                                                                <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(borrow.formattedAmount), borrow.symbol)}</div>
+                                                                            </div>
+                                                                        </div>
+                                                                        <Button size="sm" onClick={() => handleOpenSwap(chain.chainId, borrow, chain.marketAssets, chain.borrows, [], false)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
+                                                                            <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })
+                                                    ) : (
+                                                        chain.supplies.length <= 1 ? (
+                                                            <div className="flex items-center gap-3 px-6 h-full min-h-[54px] opacity-60">
+                                                                <CircleDashed className="w-4 h-4 text-slate-300 dark:text-slate-600" />
+                                                                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-tight">No active borrows</div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex-1 flex flex-col items-center pt-10 text-center px-6">
+                                                                <div className="w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-900/50 flex items-center justify-center mb-4">
+                                                                    <CircleDashed className="w-5 h-5 text-slate-300 dark:text-slate-500" />
+                                                                </div>
+                                                                <div className="text-sm font-bold text-slate-900 dark:text-white mb-1.5 leading-none">No active borrows</div>
+                                                                <div className="text-[11px] text-slate-500 dark:text-slate-400 max-w-[180px] leading-tight">Assets you borrow on this network will appear here.</div>
+                                                            </div>
+                                                        )
+                                                    )}
+                                                    {/* Fill space if supplies column is taller */}
+                                                    {chain.borrows.length > 0 && chain.borrows.length < chain.supplies.length && (
+                                                        <div className="flex-1" />
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         </div>
