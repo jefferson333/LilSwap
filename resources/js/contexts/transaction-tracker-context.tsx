@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
-import { getNetworkByChainId } from '../constants/networks';
+import { getMarketByChainId } from '../constants/networks';
 import { createRpcProvider } from '../helpers/rpc-helper';
 import logger from '../utils/logger';
 import { useToast } from './toast-context';
@@ -11,7 +11,7 @@ export interface PendingTransaction {
     description: string;
     status: 'pending' | 'success' | 'error';
     timestamp: number;
-    networkKey?: string;
+    marketKey: string; // Required for isolation
     revertReason?: string;
 }
 
@@ -197,13 +197,16 @@ export const TransactionTrackerProvider: React.FC<{ children: ReactNode }> = ({ 
 
             for (const tx of pending) {
                 try {
-                    const network = getNetworkByChainId(tx.chainId);
+                    // FIX: Always prefer marketKey for accurate RPC/config lookup
+                    const { getMarketByKey } = await import('../constants/networks');
+                    const market = getMarketByKey(tx.marketKey);
 
-                    if (!network) {
+                    if (!market) {
+                        logger.warn(`[TransactionTracker] No market config found for key: ${tx.marketKey}`);
                         continue;
                     }
 
-                    const provider = createRpcProvider(network.rpcUrls);
+                    const provider = createRpcProvider(market.rpcUrls);
                     const receipt = await provider.getTransactionReceipt(tx.hash);
 
                     if (receipt) {

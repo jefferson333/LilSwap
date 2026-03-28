@@ -32,6 +32,7 @@ import { Modal } from './modal';
 import { TokenSelector } from './token-selector';
 import { Button } from './ui/button';
 import { formatUSD, formatCompactToken, getDisplaySymbol, formatAPY, formatHF, formatCompactNumber } from '../utils/formatters';
+import logger from '../utils/logger';
 
 
 
@@ -43,6 +44,7 @@ interface DebtSwapModalProps {
     providedBorrows?: any[] | null;
     marketAssets?: any[] | null;
     chainId?: number | null;
+    marketKey?: string | null;
     donator?: any | null;
 }
 
@@ -55,11 +57,12 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
     initialToToken = null,
     providedBorrows = null,
     marketAssets: externalMarketAssets = null,
+    marketKey: initialMarketKey = null,
     donator = null,
 }) => {
     const { account, provider, selectedNetwork, networkRpcProvider } = useWeb3();
     const { addToast } = useToast();
-    const { marketAssets: fetchedMarketAssets, borrows, summary, refresh: refreshPositions } = useUserPosition();
+    const { marketAssets: fetchedMarketAssets, borrows, summary, refresh: refreshPositions } = useUserPosition(initialMarketKey || '');
     const { addTransaction, setSheetOpen } = useTransactionTracker();
     const localMarketAssets = useMemo(() => externalMarketAssets || fetchedMarketAssets || [], [externalMarketAssets, fetchedMarketAssets]);
     const effectiveNetwork = selectedNetwork;
@@ -114,6 +117,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         fromToken,
         toToken,
         selectedNetwork: effectiveNetwork,
+        marketKey: initialMarketKey || effectiveNetwork?.key,
         account,
         enabled: isOpen,
         freezeQuote,
@@ -183,6 +187,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         clearQuote,
         clearQuoteError,
         selectedNetwork: effectiveNetwork,
+        marketKey: initialMarketKey || effectiveNetwork?.key,
         preferPermit,
         freezeQuote,
         onTxSent: (hash: string) => {
@@ -191,6 +196,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             addTransaction({
                 hash,
                 chainId: effectiveNetwork.chainId,
+                marketKey: initialMarketKey || effectiveNetwork?.key,
                 description: `Swap Debt: ${fromToken.symbol} → ${toToken.symbol}`
             });
 
@@ -341,8 +347,10 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             return;
         }
 
+        const marketKey = initialMarketKey || effectiveNetwork?.key || '';
+
         // Check cache
-        const cacheStatus = getPairStatus(fromAddr, destAddr, effectiveNetwork.chainId);
+        const cacheStatus = getPairStatus(fromAddr, destAddr, marketKey);
 
         if (cacheStatus !== null) {
             return;
@@ -364,7 +372,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             const isSwappable = await checkPairSwappable(
                 fromToken,
                 destToken,
-                effectiveNetwork.chainId,
+                marketKey,
                 getDebtQuote,
                 {
                     adapterAddress: account,
@@ -395,7 +403,8 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             return { swappable: false, checking: false };
         }
 
-        const cacheStatus = getPairStatus(fromAddr, destAddr, effectiveNetwork?.chainId);
+        const marketKey = initialMarketKey || effectiveNetwork?.key || '';
+        const cacheStatus = getPairStatus(fromAddr, destAddr, marketKey);
 
         if (cacheStatus !== null) {
             return { swappable: cacheStatus.swappable, checking: false };
@@ -433,8 +442,9 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                     return status.borrowable;
                 };
 
-                // 1. Try saved selection for this network
-                const savedAddr = getSavedTokenSelection(effectiveNetwork?.chainId || 0, 'debt');
+                // 1. Try saved selection for this market
+                const marketKey = initialMarketKey || effectiveNetwork?.key || '';
+                const savedAddr = getSavedTokenSelection(marketKey, 'debt');
                 const savedMatch = savedAddr ? localMarketAssets.find(m => (m.address || m.underlyingAsset || '').toLowerCase() === savedAddr) : null;
 
                 if (savedMatch && isGoodDefault(savedMatch)) {
@@ -452,13 +462,14 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
     }, [isOpen, initialFromToken, initialToToken, localMarketAssets]);
 
     useEffect(() => {
-        if (isOpen && toToken && effectiveNetwork?.chainId) {
+        if (isOpen && toToken && effectiveNetwork) {
+            const marketKey = initialMarketKey || effectiveNetwork?.key || '';
             const addr = (toToken.address || toToken.underlyingAsset || '').toLowerCase();
             if (addr) {
-                saveTokenSelection(effectiveNetwork.chainId, 'debt', addr);
+                saveTokenSelection(marketKey, 'debt', addr);
             }
         }
-    }, [toToken, isOpen, effectiveNetwork?.chainId]);
+    }, [toToken, isOpen, effectiveNetwork, initialMarketKey]);
 
     // Reset pair validation state when fromToken changes
 
@@ -615,7 +626,8 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                 return false;
             }
 
-            if (getPairStatus(fromAddr, destAddr, effectiveNetwork?.chainId) !== null) {
+            const marketKey = initialMarketKey || effectiveNetwork?.key || '';
+            if (getPairStatus(fromAddr, destAddr, marketKey) !== null) {
                 return false;
             }
 
@@ -629,7 +641,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
             return true;
         }) || null;
-    }, [isOpen, tokenSelectorOpen, selectingForFrom, fromToken, localMarketAssets, effectiveNetwork?.chainId, swappableTokens]);
+    }, [isOpen, tokenSelectorOpen, selectingForFrom, fromToken, localMarketAssets, initialMarketKey, effectiveNetwork, swappableTokens]);
 
     useEffect(() => {
         if (tokenSelectorOpen && !selectingForFrom && fromToken) {
@@ -1259,15 +1271,11 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                     </div>
                                     <div className="text-right font-medium">
                                         {(() => {
-                                            if (!summary) {
-                                                return <span>-</span>;
-                                            }
+                                            if (!summary) return <span>-</span>;
 
-                                            const currentHf = parseFloat(summary.healthFactor);
-
-                                            if (isNaN(currentHf)) {
-                                                return <span>-</span>;
-                                            }
+                                            const currentHfRaw = parseFloat(summary.healthFactor);
+                                            // Handle Aave's "Infinity" which is represented as a very large number or specifically handled by formatHF
+                                            const currentHf = (isNaN(currentHfRaw) || currentHfRaw > 100) ? -1 : currentHfRaw;
 
                                             const currentTotalCollateralUSD = parseFloat(summary.totalCollateralUSD) || 0;
                                             const currentLiquidationThreshold = parseFloat(summary.currentLiquidationThreshold) || 0;
@@ -1277,48 +1285,31 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
                                             if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
                                                 try {
-                                                    const reducedDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, fromToken.decimals || 18));
-                                                    const newDebtAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, toToken.decimals || 18));
+                                                    const repaidDebtUsd = parseFloat(swapQuote.destUSD || '0');
+                                                    const newDebtUsd = parseFloat(swapQuote.srcUSD || '0');
 
-                                                    const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
-                                                    const fromMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
-                                                    const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
+                                                    // Calculate the new total borrows.
+                                                    // If we are swapping a specific debt to another, the net change is (newDebt - repaidDebt).
+                                                    const simulatedTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
 
-                                                    const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
-                                                    const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
-                                                    const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
-
-                                                    if (fromPrice > 0 && toPrice > 0) {
-                                                        const repaidDebtUsd = reducedDebtAmountF * fromPrice;
-                                                        const newDebtUsd = newDebtAmountF * toPrice;
-
-                                                        const newTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
-
-                                                        if (newTotalBorrowsUSD > 0) {
-                                                            simulatedHf = (currentTotalCollateralUSD * currentLiquidationThreshold) / newTotalBorrowsUSD;
-                                                        } else {
-                                                            simulatedHf = -1;
-                                                        }
+                                                    if (simulatedTotalBorrowsUSD > 0.01) {
+                                                        simulatedHf = (currentTotalCollateralUSD * currentLiquidationThreshold) / simulatedTotalBorrowsUSD;
+                                                    } else {
+                                                        simulatedHf = -1; // No debt = Infinity
                                                     }
-                                                } catch {
-                                                    // Keep preview resilient if interim quote math fails.
+                                                } catch (err) {
+                                                    logger.error('HF Simulation Error', err);
                                                 }
                                             }
 
                                             const getHfColor = (hf: number) => {
-                                                if (hf === -1 || hf >= 3) {
-                                                    return 'text-emerald-500';
-                                                }
-
-                                                if (hf >= 1.1) {
-                                                    return 'text-orange-500';
-                                                }
-
+                                                if (hf === -1 || hf >= 3) return 'text-emerald-500';
+                                                if (hf >= 1.1) return 'text-orange-500';
                                                 return 'text-red-500';
                                             };
 
                                             return (
-                                                <div className="flex flex-col items-end">
+                                                <div className="flex flex-col items-end text-sm">
                                                     <div className="flex items-center gap-1.5 font-bold">
                                                         <span className={getHfColor(currentHf)}>{formatHF(currentHf)}</span>
                                                         <span className="text-slate-400 font-normal">→</span>
@@ -1592,14 +1583,14 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                     description={selectingForFrom ? 'Choose a token to swap from your debt positions' : 'Choose a token to swap into'}
                     tokens={filteredSelectorTokens}
                     onSelect={(token) => {
-                        const chainId = selectedNetwork?.chainId || 1;
+                        const marketKey = initialMarketKey || selectedNetwork?.key || '';
                         const tokenAddr = (token.address || token.underlyingAsset || '');
                         if (selectingForFrom) {
                             setFromToken(token);
-                            saveTokenSelection(chainId, 'debt-from', tokenAddr);
+                            saveTokenSelection(marketKey, 'debt-from', tokenAddr);
                         } else {
                             setToToken(token);
-                            saveTokenSelection(chainId, 'debt', tokenAddr);
+                            saveTokenSelection(marketKey, 'debt', tokenAddr);
                         }
                         setTokenSelectorOpen(false);
                     }}

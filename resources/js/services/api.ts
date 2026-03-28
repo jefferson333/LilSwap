@@ -34,9 +34,9 @@ return false;
     const normalized = String(url).toLowerCase();
 
     return (
-        normalized.startsWith('/position') ||
-        normalized.startsWith('/quote/') ||
-        normalized.startsWith('/build/') ||
+        normalized.startsWith('/aave/v3/position') ||
+        normalized.startsWith('/aave/v3/quote/') ||
+        normalized.startsWith('/aave/v3/build/') ||
         normalized.startsWith('/rpc/') ||
         normalized.startsWith('/api/')
     );
@@ -223,7 +223,7 @@ apiClient.interceptors.response.use(
 
 export const getDebtQuote = async (params: any, signal?: AbortSignal) => {
     try {
-        const response = await apiClient.post('/quote/debt', params, { signal });
+        const response = await apiClient.post('/aave/v3/quote/debt', params, { signal });
         logger.debug('Debt quote received', { srcAmount: response.data.srcAmount });
 
         return response.data;
@@ -241,7 +241,7 @@ throw error;
 
 export const buildDebtSwapTx = async (params: any) => {
     try {
-        const response = await apiClient.post('/build/debt/paraswap', params);
+        const response = await apiClient.post('/aave/v3/build/debt/paraswap', params);
 
         return response.data;
     } catch (error: any) {
@@ -252,14 +252,23 @@ export const buildDebtSwapTx = async (params: any) => {
     }
 };
 
-export const getUserPosition = async (walletAddress: string, chainId: number) => {
+export const getUserPosition = async (walletAddress: string, marketKey?: string, chainId?: number) => {
     try {
-        const response = await apiClient.post('/position', {
+        const response = await apiClient.post('/aave/v3/position', {
             walletAddress,
+            marketKey,
             chainId
         });
 
-        return response.data[chainId] || response.data;
+        if (marketKey) {
+            return response.data[marketKey] || response.data;
+        }
+
+        if (chainId) {
+            return response.data[chainId] || response.data;
+        }
+
+        return response.data;
     } catch (error: any) {
         const errorMessage = error.response?.data?.error || error.message || 'Error fetching position';
 
@@ -269,7 +278,7 @@ export const getUserPosition = async (walletAddress: string, chainId: number) =>
 
 export const getCollateralQuote = async (params: any, signal?: AbortSignal) => {
     try {
-        const response = await apiClient.post('/quote/collateral', params, { signal });
+        const response = await apiClient.post('/aave/v3/quote/collateral', params, { signal });
 
         return response.data;
     } catch (error: any) {
@@ -286,7 +295,7 @@ throw error;
 
 export const buildCollateralSwapTx = async (params: any) => {
     try {
-        const response = await apiClient.post('/build/collateral/paraswap', params);
+        const response = await apiClient.post('/aave/v3/build/collateral/paraswap', params);
 
         return response.data;
     } catch (error: any) {

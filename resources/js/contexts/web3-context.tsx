@@ -1,11 +1,11 @@
-import { mainnet, bsc, polygon, base, arbitrum, avalanche } from '@reown/appkit/networks';
+import { mainnet, bsc, polygon, base, arbitrum, avalanche, optimism, gnosis, sonic } from '@reown/appkit/networks';
 import { createAppKit, useAppKitProvider, useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react';
 import { EthersAdapter } from '@reown/appkit-adapter-ethers';
 import { ethers } from 'ethers';
 import type { ReactNode } from 'react';
 import React, { createContext, useContext, useCallback, useEffect, useMemo, useState } from 'react';
-import type { NetworkConfig } from '../constants/networks';
-import { DEFAULT_NETWORK, NETWORKS, getNetworkByChainId } from '../constants/networks';
+import type { MarketConfig } from '../constants/networks';
+import { DEFAULT_MARKET, MARKETS, getMarketByChainId } from '../constants/networks';
 import { createRpcProvider } from '../helpers/rpc-helper';
 import { bootstrapProxySession, disconnectProxySession, setProxySessionIdentity } from '../services/api';
 import logger from '../utils/logger';
@@ -15,9 +15,9 @@ interface Web3ContextType {
     account: string | null;
     connectWallet: () => Promise<void>;
     disconnectWallet: () => Promise<void>;
-    selectedNetwork: NetworkConfig;
-    setSelectedNetwork: (networkKey: string) => Promise<void>;
-    availableNetworks: NetworkConfig[];
+    selectedNetwork: MarketConfig;
+    setSelectedNetwork: (marketKey: string) => Promise<void>;
+    availableNetworks: MarketConfig[];
     networkRpcProvider: ethers.JsonRpcProvider | null;
     isConnecting: boolean;
     modal: any;
@@ -36,7 +36,7 @@ export const useWeb3 = () => {
 };
 
 const projectId = (import.meta as any).env.VITE_REOWN_PROJECT_ID || 'b8480dbf6f1c429fb1e3fcbefa80c920';
-const appKitNetworks: any[] = [mainnet, arbitrum, polygon, base, bsc, avalanche];
+const appKitNetworks: any[] = [mainnet, arbitrum, polygon, base, bsc, avalanche, optimism, gnosis, sonic];
 
 const metadata = {
     name: 'LilSwap',
@@ -82,11 +82,11 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const [provider, setProvider] = useState<ethers.BrowserProvider | null>(null);
     const [account, setAccount] = useState<string | null>(null);
-    const [selectedNetworkKey, setSelectedNetworkKey] = useState<string>(DEFAULT_NETWORK.key);
+    const [selectedMarketKey, setSelectedMarketKey] = useState<string>(DEFAULT_MARKET.key);
     const [isConnecting, setIsConnecting] = useState(false);
 
-    const selectedNetwork = useMemo(() => NETWORKS[selectedNetworkKey] || DEFAULT_NETWORK, [selectedNetworkKey]);
-    const allowedNetworks = useMemo(() => Object.values(NETWORKS), []);
+    const selectedNetwork = useMemo(() => MARKETS[selectedMarketKey] || DEFAULT_MARKET, [selectedMarketKey]);
+    const allowedNetworks = useMemo(() => Object.values(MARKETS), []);
 
     const networkRpcProvider = useMemo(() => {
         const rpcUrls = selectedNetwork?.rpcUrls;
@@ -117,14 +117,13 @@ return null;
 
     useEffect(() => {
         if (chainId) {
-            const newNetwork = getNetworkByChainId(chainId);
+            const newMarket = getMarketByChainId(chainId);
 
-            if (newNetwork) {
-                setSelectedNetworkKey(newNetwork.key);
+            if (newMarket) {
+                setSelectedMarketKey(newMarket.key);
             }
         }
     }, [chainId]);
-
     useEffect(() => {
         if (!isConnected || !address) {
             setProxySessionIdentity(null);
@@ -171,15 +170,15 @@ return null;
         }
     }, []);
 
-    const changeNetwork = useCallback(async (networkKey: string) => {
-        const targetNetwork = NETWORKS[networkKey];
+    const changeNetwork = useCallback(async (marketKey: string) => {
+        const targetMarket = MARKETS[marketKey];
 
-        if (!targetNetwork) {
+        if (!targetMarket) {
 return;
 }
 
         try {
-            const appKitNetwork = appKitNetworks.find(n => n.id === targetNetwork.chainId);
+            const appKitNetwork = appKitNetworks.find(n => n.id === targetMarket.chainId);
 
             if (appKitNetwork) {
                 await modal.switchNetwork(appKitNetwork);

@@ -49,7 +49,7 @@ export const useAllPositions = (walletAddress: string | null, opts: { refreshInt
         setError(null);
 
         try {
-            const response = await apiClient.post('/position', {
+            const response = await apiClient.post('/aave/v3/position', {
                 walletAddress,
                 ...(force && { force: true })
             }, {

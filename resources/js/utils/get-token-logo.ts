@@ -26,6 +26,7 @@ const ALIAS: Record<string, string> = {
     'WETH.E': 'weth',
     'DAI.E': 'dai',
     'LINK.E': 'link',
+    'USDC.E': 'usdc',
     WAVAX: 'wavax',
     AUSD: 'ausd'
 };

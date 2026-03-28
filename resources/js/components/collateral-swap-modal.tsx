@@ -45,6 +45,7 @@ interface CollateralSwapModalProps {
     providedSupplies?: any[] | null;
     marketAssets?: any[] | null;
     chainId?: number | null;
+    marketKey?: string | null;
     donator?: any | null;
 }
 
@@ -57,11 +58,12 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
     initialToToken = null,
     providedSupplies = null,
     marketAssets: externalMarketAssets = null,
+    marketKey: initialMarketKey = null,
     donator = null,
 }) => {
     const { account, provider, selectedNetwork, networkRpcProvider } = useWeb3();
     const { addToast } = useToast();
-    const { marketAssets: fetchedMarketAssets, supplies, summary } = useUserPosition();
+    const { marketAssets: fetchedMarketAssets, supplies, summary } = useUserPosition(initialMarketKey || '');
     const { addTransaction, setSheetOpen } = useTransactionTracker();
     const localMarketAssets = useMemo(() => externalMarketAssets || fetchedMarketAssets || [], [externalMarketAssets, fetchedMarketAssets]);
 
@@ -128,6 +130,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         fromToken,
         toToken,
         selectedNetwork,
+        marketKey: initialMarketKey || selectedNetwork?.key,
         account,
         enabled: isOpen,
         freezeQuote,
@@ -161,12 +164,14 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         clearQuote,
         clearQuoteError,
         selectedNetwork,
+        marketKey: initialMarketKey || selectedNetwork?.key,
         onTxSent: (hash: string) => {
             const amountDisplay = inputValue ? `${inputValue} ${fromToken.symbol}` : '';
 
             addTransaction({
                 hash,
                 chainId: selectedNetwork?.chainId || 1,
+                marketKey: initialMarketKey || selectedNetwork?.key,
                 description: `Swap Collateral: ${fromToken.symbol} → ${toToken.symbol}`
             });
 
@@ -348,7 +353,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         : selectorTokens;
 
     const validatePairSwappability = useCallback(async (destToken: any) => {
-        if (!fromToken || !destToken || !selectedNetwork?.chainId) {
+        if (!fromToken || !destToken || !selectedNetwork) {
             return;
         }
 
@@ -359,7 +364,8 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
             return;
         }
 
-        const cached = getPairStatus(fromAddr, destAddr, selectedNetwork.chainId);
+        const marketKey = initialMarketKey || selectedNetwork?.key || '';
+        const cached = getPairStatus(fromAddr, destAddr, marketKey);
 
         if (cached !== null) {
             return;
@@ -374,15 +380,16 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         setSwappableTokens((prev) => ({ ...prev, [destAddr]: { swappable: null, checking: true } }));
 
         try {
+            const marketKey = initialMarketKey || selectedNetwork?.key || '';
             const isSwappable = await checkPairSwappable(
                 fromToken,
                 destToken,
-                selectedNetwork.chainId,
+                marketKey,
                 getCollateralQuote,
                 {
                     adapterAddress: account,
                     walletAddress: account,
-                    chainId: selectedNetwork.chainId,
+                    marketKey,
                     amountField: 'srcAmount',
                     amount: '1',
                 }
@@ -408,7 +415,8 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
             return { swappable: false, checking: false };
         }
 
-        const cacheStatus = getPairStatus(fromAddr, destAddr, selectedNetwork?.chainId);
+        const marketKey = initialMarketKey || selectedNetwork?.key || '';
+        const cacheStatus = getPairStatus(fromAddr, destAddr, marketKey);
 
         if (cacheStatus !== null) {
             return { swappable: cacheStatus.swappable, checking: false };
@@ -421,7 +429,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         }
 
         return { swappable: null, checking: false };
-    }, [fromToken, selectedNetwork?.chainId, swappableTokens]);
+    }, [fromToken, selectedNetwork, swappableTokens, initialMarketKey]);
 
     // --- Effects ---
     useEffect(() => {
@@ -444,8 +452,9 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                     return !token.isFrozen && !token.isPaused && token.isActive !== false;
                 };
 
-                // 1. Try saved selection for this network
-                const savedAddr = getSavedTokenSelection(selectedNetwork?.chainId || 0, 'collateral');
+                // 1. Try saved selection for this market
+                const marketKey = initialMarketKey || selectedNetwork?.key || '';
+                const savedAddr = getSavedTokenSelection(marketKey, 'collateral');
                 const savedMatch = savedAddr ? localMarketAssets.find(m => (m.address || m.underlyingAsset || '').toLowerCase() === savedAddr) : null;
 
                 if (savedMatch && isGoodDefault(savedMatch)) {
@@ -463,13 +472,14 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
     }, [isOpen, initialFromToken, initialToToken, localMarketAssets]);
 
     useEffect(() => {
-        if (isOpen && toToken && selectedNetwork?.chainId) {
+        if (isOpen && toToken && selectedNetwork) {
+            const marketKey = initialMarketKey || selectedNetwork?.key || '';
             const addr = (toToken.address || toToken.underlyingAsset || '').toLowerCase();
             if (addr) {
-                saveTokenSelection(selectedNetwork.chainId, 'collateral', addr);
+                saveTokenSelection(marketKey, 'collateral', addr);
             }
         }
-    }, [toToken, isOpen, selectedNetwork?.chainId]);
+    }, [toToken, isOpen, selectedNetwork, initialMarketKey]);
 
     // Reset pair validation state when fromToken changes
 
@@ -592,7 +602,8 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                 return false;
             }
 
-            if (getPairStatus(fromAddr, destAddr, selectedNetwork?.chainId) !== null) {
+            const marketKey = initialMarketKey || selectedNetwork?.key || '';
+            if (getPairStatus(fromAddr, destAddr, marketKey) !== null) {
                 return false;
             }
 
@@ -606,7 +617,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
             return true;
         }) || null;
-    }, [isOpen, tokenSelectorOpen, selectingForFrom, fromToken, localMarketAssets, selectedNetwork?.chainId, swappableTokens]);
+    }, [isOpen, tokenSelectorOpen, selectingForFrom, fromToken, localMarketAssets, selectedNetwork, initialMarketKey, swappableTokens]);
 
     useEffect(() => {
         if (tokenSelectorOpen && !selectingForFrom && fromToken) {
@@ -1246,19 +1257,24 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                                                         const withdrawnAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, fromToken.decimals || 18));
                                                         const newAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18));
 
-                                                        const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
-                                                        const fromMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
-                                                        const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
+                                                         const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
+                                                         const fromMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
+                                                         
+                                                         // FIX: Normalize price (Aave raw prices are 1e8)
+                                                         const rawFromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD ?? '0');
+                                                         const fromPrice = rawFromPrice > 1_000_000_000 ? rawFromPrice / 1e8 : rawFromPrice;
 
-                                                        const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
-                                                        const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
-                                                        const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
+                                                         const toAddr = (toToken?.underlyingAsset || toToken?.address || '').toLowerCase();
+                                                         const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                                                         
+                                                         // FIX: Normalize price (Aave raw prices are 1e8)
+                                                         const rawToPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD ?? '0');
+                                                         const toPrice = rawToPrice > 1_000_000_000 ? rawToPrice / 1e8 : rawToPrice;
 
                                                         if (fromPrice > 0 && toPrice > 0) {
-                                                            const withdrawnUsd = withdrawnAmountF * fromPrice;
-                                                            const netReceivedAmountToken = newAmountF * (1 - ((swapQuote.feeBps || 0) / 10000)) * (1 - (slippage / 10000));
-                                                            const newUsd = netReceivedAmountToken * toPrice;
-                                                            simulatedTotalCollateralUSD = Math.max(0, currentTotalCollateralUSD - withdrawnUsd + newUsd);
+                                                            const withdrawnUsd = parseFloat(swapQuote.srcUSD || '0') || (withdrawnAmountF * fromPrice);
+                                                            const netReceivedUsd = parseFloat(swapQuote.destUSD || '0') || (newAmountF * (1 - ((swapQuote.feeBps || 0) / 10000)) * (1 - (slippage / 10000)) * toPrice);
+                                                            simulatedTotalCollateralUSD = Math.max(0, currentTotalCollateralUSD - withdrawnUsd + netReceivedUsd);
                                                         }
                                                     } catch {
                                                         // Keep preview resilient if interim quote math fails.
@@ -1445,7 +1461,9 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                     const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
                     const toCanBeCollateral = toMarketToken?.usageAsCollateralEnabled;
 
-                    const currentHf = parseFloat(summary?.healthFactor || '0');
+                    const currentHfRaw = parseFloat(summary?.healthFactor || '0');
+                    const currentHf = (isNaN(currentHfRaw) || currentHfRaw > 100) ? -1 : currentHfRaw;
+
                     const currentTotalCollateralUSD = parseFloat(summary?.totalCollateralUSD) || 0;
                     const currentLiquidationThreshold = parseFloat(summary?.currentLiquidationThreshold) || 0;
                     const currentTotalBorrowsUSD = parseFloat(summary?.totalBorrowsUSD) || 0;
@@ -1453,32 +1471,31 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
                     if (swapQuote?.srcAmount && swapQuote?.destAmount) {
                         try {
-                            const srcAmountF = parseFloat(ethers.formatUnits(swapQuote.srcAmount, fromToken.decimals || 18));
-                            const destAmountF = parseFloat(ethers.formatUnits(swapQuote.destAmount, toToken.decimals || 18));
                             const fromAddr = (fromToken?.underlyingAsset || fromToken?.address || '').toLowerCase();
                             const fromMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === fromAddr);
-                            const fromPrice = parseFloat(fromMarketToken?.priceInUSD ?? fromToken?.priceInUSD) || 0;
                             const fromLiqThreshold = parseFloat(fromMarketToken?.reserveLiquidationThreshold || '0') || 0;
-                            const toPrice = parseFloat(toMarketToken?.priceInUSD ?? toToken?.priceInUSD) || 0;
+                            
                             const toLiqThreshold = parseFloat(toMarketToken?.reserveLiquidationThreshold || '0') || 0;
 
-                            if (fromPrice > 0 && toPrice > 0) {
-                                const withdrawnCollateralUsd = srcAmountF * fromPrice;
-                                const netReceivedAmount = destAmountF * (1 - ((swapQuote.feeBps || 0) / 10000)) * (1 - (slippage / 10000));
-                                const newCollateralUsd = netReceivedAmount * toPrice;
-                                const currentCollateralPower = currentTotalCollateralUSD * currentLiquidationThreshold;
-                                const withdrawnCollateralPower = withdrawnCollateralUsd * fromLiqThreshold;
-                                const newCollateralPower = newCollateralUsd * toLiqThreshold;
-                                const newTotalCollateralPower = Math.max(0, currentCollateralPower - withdrawnCollateralPower + newCollateralPower);
+                            const srcUSD = parseFloat(swapQuote.srcUSD || '0');
+                            const netReceivedUsd = parseFloat(swapQuote.destUSD || '0');
 
-                                if (currentTotalBorrowsUSD > 0) {
-                                    simulatedHf = newTotalCollateralPower / currentTotalBorrowsUSD;
+                            if (srcUSD > 0 && netReceivedUsd > 0) {
+                                // Collateral Power = USD * LiquidationThreshold
+                                const lostCollateralPower = srcUSD * fromLiqThreshold;
+                                const gainedCollateralPower = netReceivedUsd * toLiqThreshold;
+
+                                const currentCollateralPower = currentTotalCollateralUSD * currentLiquidationThreshold;
+                                const simulatedCollateralPower = Math.max(0, currentCollateralPower - lostCollateralPower + gainedCollateralPower);
+
+                                if (currentTotalBorrowsUSD > 0.01) {
+                                    simulatedHf = simulatedCollateralPower / currentTotalBorrowsUSD;
                                 } else {
-                                    simulatedHf = -1;
+                                    simulatedHf = -1; // No debt = Infinity
                                 }
                             }
-                        } catch {
-                            // Keep alerts resilient while quote updates.
+                        } catch (err) {
+                            logger.error('Collateral HF Simulation Error', err);
                         }
                     }
 
@@ -1623,11 +1640,16 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
                     description={selectingForFrom ? 'Choose a token to swap from your supply positions' : 'Choose a token to swap into'}
                     tokens={filteredSelectorTokens}
                     onSelect={(token) => {
+                        const marketKey = initialMarketKey || selectedNetwork?.key || '';
+                        const addr = (token.address || token.underlyingAsset || '').toLowerCase();
                         if (selectingForFrom) {
                             setFromToken(token);
+                            saveTokenSelection(marketKey, 'collateral-from', addr);
                         } else {
                             setToToken(token);
+                            saveTokenSelection(marketKey, 'collateral', addr);
                         }
+                        setTokenSelectorOpen(false);
                     }}
                     renderStatus={renderTokenStatus}
                     hideOverlay={true}
