@@ -337,91 +337,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
 
 
-    const validatePairSwappability = useCallback(async (destToken: any) => {
-        if (!fromToken || !destToken || !effectiveNetwork?.chainId) {
-            return;
-        }
 
-        const fromAddr = (fromToken.address || fromToken.underlyingAsset || '').toLowerCase();
-        const destAddr = (destToken.address || destToken.underlyingAsset || '').toLowerCase();
-
-        if (fromAddr === destAddr) {
-            return;
-        }
-
-        const marketKey = initialMarketKey || effectiveNetwork?.key || '';
-
-        // Check cache
-        const cacheStatus = getPairStatus(fromAddr, destAddr, marketKey);
-
-        if (cacheStatus !== null) {
-            return;
-        }
-
-        if (validatingPairsRef.current.has(destAddr)) {
-            return;
-        }
-
-        validatingPairsRef.current.add(destAddr);
-
-        setSwappableTokens(prev => ({ ...prev, [destAddr]: { swappable: null, checking: true } }));
-
-        try {
-            const apyPercent = typeof fromToken?.variableBorrowRate === 'number'
-                ? fromToken.variableBorrowRate * 100
-                : (typeof fromToken?.borrowRate === 'number' ? fromToken.borrowRate * 100 : null);
-
-            const isSwappable = await checkPairSwappable(
-                fromToken,
-                destToken,
-                marketKey,
-                getDebtQuote,
-                {
-                    adapterAddress: account,
-                    walletAddress: account,
-                    chainId: effectiveNetwork.chainId,
-                    apyPercent,
-                    amountField: 'destAmount',
-                    amount: '1',
-                }
-            );
-            setSwappableTokens(prev => ({ ...prev, [destAddr]: { swappable: isSwappable, checking: false } }));
-        } catch {
-            setSwappableTokens(prev => ({ ...prev, [destAddr]: { swappable: false, checking: false } }));
-        } finally {
-            validatingPairsRef.current.delete(destAddr);
-        }
-    }, [fromToken, effectiveNetwork?.chainId, account]);
-
-    const getSwappableStatus = useCallback((destToken: any) => {
-        if (!fromToken || !destToken) {
-            return { swappable: false, checking: false };
-        }
-
-        const fromAddr = (fromToken.address || fromToken.underlyingAsset || '').toLowerCase();
-        const destAddr = (destToken.address || destToken.underlyingAsset || '').toLowerCase();
-
-        if (!fromAddr || !destAddr || fromAddr === destAddr) {
-            return { swappable: false, checking: false };
-        }
-
-        const marketKey = initialMarketKey || effectiveNetwork?.key || '';
-        const cacheStatus = getPairStatus(fromAddr, destAddr, marketKey);
-
-        if (cacheStatus !== null) {
-            return { swappable: cacheStatus.swappable, checking: false };
-        }
-
-        const localStatus = swappableTokens[destAddr];
-
-        if (localStatus?.checking) {
-            return { swappable: null, checking: true };
-        }
-
-        return { swappable: null, checking: false };
-    }, [fromToken, effectiveNetwork?.chainId, swappableTokens]);
-
-    // --- Effects ---
 
     useEffect(() => {
         if (isOpen) {
@@ -435,13 +351,13 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             } else if (localMarketAssets && localMarketAssets.length > 0) {
                 const fromAddr = (initialFromToken?.address || initialFromToken?.underlyingAsset || '').toLowerCase();
 
-                // Helper to check if a token is a good default candidate
+                // Use the engine's pre-computed flag — it already encodes ALL rules:
+                // isActive, isFrozen, isPaused, borrowingEnabled, AND E-Mode compatibility.
+                // This is the single source of truth and must match the token selector list filter.
                 const isGoodDefault = (token: any) => {
                     const addr = (token.address || token.underlyingAsset || '').toLowerCase();
                     if (addr === fromAddr) return false;
-
-                    const status = getBorrowStatus(token);
-                    return status.borrowable;
+                    return token.canBeDebtSwapDestination === true;
                 };
 
                 // 1. Try saved selection for this market
@@ -452,16 +368,18 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                 if (savedMatch && isGoodDefault(savedMatch)) {
                     setToToken(savedMatch);
                 } else {
-                    // 2. Pick the FIRST eligible token from the list (no stable preference)
+                    // 2. Pick the FIRST eligible token from the list
                     const defaultTo = localMarketAssets.find(isGoodDefault);
-
                     if (defaultTo) {
                         setToToken(defaultTo);
                     }
                 }
             }
+
         }
     }, [isOpen, initialFromToken, initialToToken, localMarketAssets]);
+
+
 
     useEffect(() => {
         if (isOpen && toToken && effectiveNetwork) {
@@ -610,75 +528,6 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         return () => document.removeEventListener('mousedown', onClickOutside);
     }, [showMethodMenu]);
 
-    const nextPairValidationToken = useMemo(() => {
-        if (!isOpen || !tokenSelectorOpen || selectingForFrom || !fromToken) {
-            return null;
-        }
-
-        if (prevalidationBudgetRef.current <= 0) {
-            return null;
-        }
-
-        const fromAddr = (fromToken.address || fromToken.underlyingAsset || '').toLowerCase();
-
-        return localMarketAssets.find((token) => {
-            const destAddr = (token.address || token.underlyingAsset || '').toLowerCase();
-
-            if (!destAddr || !fromAddr || destAddr === fromAddr) {
-                return false;
-            }
-
-            const marketKey = initialMarketKey || effectiveNetwork?.key || '';
-            if (getPairStatus(fromAddr, destAddr, marketKey) !== null) {
-                return false;
-            }
-
-            if (validatingPairsRef.current.has(destAddr)) {
-                return false;
-            }
-
-            if (swappableTokens[destAddr]?.checking) {
-                return false;
-            }
-
-            return true;
-        }) || null;
-    }, [isOpen, tokenSelectorOpen, selectingForFrom, fromToken, localMarketAssets, initialMarketKey, effectiveNetwork, swappableTokens]);
-
-    useEffect(() => {
-        if (tokenSelectorOpen && !selectingForFrom && fromToken) {
-            prevalidationBudgetRef.current = MAX_PREVALIDATIONS_PER_OPEN;
-
-            return;
-        }
-
-        prevalidationBudgetRef.current = 0;
-    }, [tokenSelectorOpen, selectingForFrom, fromToken]);
-
-    useEffect(() => {
-        if (!nextPairValidationToken || isPairValidationRunning) {
-            return;
-        }
-
-        let active = true;
-        prevalidationBudgetRef.current = Math.max(0, prevalidationBudgetRef.current - 1);
-        setIsPairValidationRunning(true);
-
-        void (async () => {
-            try {
-                await validatePairSwappability(nextPairValidationToken);
-            } finally {
-                if (active) {
-                    setIsPairValidationRunning(false);
-                }
-            }
-        })();
-
-        return () => {
-            active = false;
-        };
-    }, [nextPairValidationToken, validatePairSwappability, isPairValidationRunning]);
-
     useEffect(() => {
         if (txError || userRejected) {
             clearTxError();
@@ -741,14 +590,6 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
             }
         }
 
-        const swappableStatus = getSwappableStatus(token);
-
-        if (!selectingForFrom && swappableStatus.swappable === false && !swappableStatus.checking) {
-            disabled = true;
-            reasons.push('Swap unavailable');
-        } else if (!selectingForFrom && swappableStatus.checking) {
-            reasons.push('Checking availability...');
-        }
 
         return {
             disabled,
@@ -763,13 +604,30 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         : (localMarketAssets || []);
 
     const oppositeToken = selectingForFrom ? toToken : fromToken;
-    const filteredSelectorTokens = oppositeToken
-        ? selectorTokens.filter((t) => {
+    const filteredSelectorTokens = useMemo(() => {
+        let list = selectorTokens;
+        if (oppositeToken) {
             const oppositeAddr = (oppositeToken.address || oppositeToken.underlyingAsset || '').toLowerCase();
+            list = list.filter((t) => (t.address || t.underlyingAsset || '').toLowerCase() !== oppositeAddr);
+        }
 
-            return (t.address || t.underlyingAsset || '').toLowerCase() !== oppositeAddr;
-        })
-        : selectorTokens;
+        // --- AAVE STRICT FILTERING (FOR DEBT) ---
+        // Assets are pre-filtered by the backend with explicit flags based on ALL Aave constraints
+        // (E-Mode category matching, isActive, isFrozen, borrowingEnabled, etc.)
+        // We only apply this to destination tokens (selectingForFrom === false).
+        if (!selectingForFrom) {
+            list = list.filter((t) => {
+                const addr = (t.address || t.underlyingAsset || '').toLowerCase();
+                const m = (localMarketAssets || []).find(ma => (ma.address || ma.underlyingAsset || '').toLowerCase() === addr);
+                if (!m) return false;
+                
+                // For Debt Swap, the destination must be a valid borrowable asset per the backend
+                return m.canBeDebtSwapDestination === true;
+            });
+        }
+
+        return list;
+    }, [selectorTokens, oppositeToken, selectingForFrom, summary?.eModeCategoryId, localMarketAssets]);
     const slippageMenuRef = useRef<HTMLDivElement>(null);
 
 
@@ -1269,6 +1127,11 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                                 <div className="flex justify-between items-start text-[13px] text-slate-600 dark:text-slate-300 font-medium">
                                     <div className="flex items-center gap-1.5">
                                         <span>Health factor</span>
+                                        {summary?.eModeCategoryId && summary.eModeCategoryId !== 0 && (
+                                            <span className="px-1 py-0.5 rounded-sm bg-sky-100 dark:bg-sky-900/40 text-sky-600 dark:text-sky-400 text-[9px] font-black uppercase tracking-tighter leading-none border border-sky-200 dark:border-sky-800/50">
+                                                E-Mode
+                                            </span>
+                                        )}
                                         <InfoTooltip content="Safety of your collateral against borrowed assets." size={12} />
                                     </div>
                                     <div className="text-right font-medium">
@@ -1425,6 +1288,83 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                     </div>
                 )}
 
+                {/* Safety Alerts */}
+                {(() => {
+                    if (!fromToken || !toToken || !localMarketAssets || !summary) {
+                        return null;
+                    }
+
+                    const toAddr = (toToken.underlyingAsset || toToken.address || '').toLowerCase();
+                    const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                    
+                    const currentHfRaw = parseFloat(summary.healthFactor || '0');
+                    const currentHf = (isNaN(currentHfRaw) || currentHfRaw > 100) ? -1 : currentHfRaw;
+
+                    let simulatedHf = currentHf;
+                    if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
+                         try {
+                            const currentTotalCollateralUSD = parseFloat(summary.totalCollateralUSD) || 0;
+                            const currentLiquidationThreshold = parseFloat(summary.currentLiquidationThreshold) || 0;
+                            const currentTotalBorrowsUSD = parseFloat(summary.totalBorrowsUSD) || 0;
+                            
+                            const repaidDebtUsd = parseFloat(swapQuote.destUSD || '0');
+                            const newDebtUsd = parseFloat(swapQuote.srcUSD || '0');
+                            const simulatedTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
+
+                            if (simulatedTotalBorrowsUSD > 0.01) {
+                                simulatedHf = (currentTotalCollateralUSD * currentLiquidationThreshold) / simulatedTotalBorrowsUSD;
+                            } else {
+                                simulatedHf = -1;
+                            }
+                        } catch {}
+                    }
+
+                    const alerts: Array<{ label: string; message: string; isDanger: boolean }> = [];
+
+                    const userEmodeId = summary.eModeCategoryId || 0;
+                    if (userEmodeId > 0 && toMarketToken && toMarketToken.isBorrowableInCurrentEMode === false) {
+                        alerts.push({
+                            label: 'E-Mode Conflict:',
+                            message: `${toToken.symbol} cannot be borrowed while in your active E-Mode category. You must disable E-Mode first.`,
+                            isDanger: true,
+                        });
+                    }
+
+                    if (simulatedHf !== -1 && simulatedHf < 1.05 && !isInsufficientBalance) {
+                        alerts.push({
+                            label: 'Danger:',
+                            message: `This swap will leave your Health Factor very low (${simulatedHf.toFixed(2)}).`,
+                            isDanger: true,
+                        });
+                    }
+
+                    if (priceImpact > 0.05) {
+                        alerts.push({
+                            label: 'High Impact:',
+                            message: `Price impact is very high (${(priceImpact * 100).toFixed(2)}%).`,
+                            isDanger: true,
+                        });
+                    }
+
+                    if (alerts.length === 0) {
+                        return null;
+                    }
+
+                    return (
+                        <div className="space-y-1 mb-1 mt-2">
+                            {alerts.map((alert, i) => (
+                                <div key={`${alert.label}-${i}`} className="flex justify-center gap-1.5 px-1">
+                                    <span className={`text-[11px] font-bold ${alert.isDanger ? 'text-red-500' : 'text-amber-500'}`}>{alert.label}</span>
+                                    <div className={`flex items-center gap-1 text-[11px] font-bold ${alert.isDanger ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-500'}`}>
+                                        <span className="text-center">{alert.message}</span>
+                                        <AlertTriangle className="w-3 h-3 shrink-0" />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    );
+                })()}
+
                 {/* Approval Method Section */}
                 {fromToken && toToken && (
                     <div ref={methodMenuRef} className="relative flex items-center justify-end gap-2 pb-1 px-1">
@@ -1555,25 +1495,36 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                 )}
 
                 {/* Action Button */}
-                <Button
-                    disabled={isBusy || !swapQuote || swapAmount === BigInt(0) || isInsufficientBalance}
-                    onClick={handleSwap}
-                    className={`w-full py-3 h-auto font-bold rounded-xl mt-2 ${isInsufficientBalance ? 'bg-rose-500 hover:bg-rose-600 border-rose-600 text-white' : ''}`}
-                >
-                    {isActionLoading ? (
-                        <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            {isSigning ? 'Signing in wallet...' : 'Processing...'}
-                        </>
-                    ) : isInsufficientBalance ? (
-                        'Insufficient Balance'
-                    ) : (
-                        <>
-                            <ArrowRightLeft className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
-                            {preferPermit && (forceRequirePermit || !signedPermit) ? 'Sign & Swap' : 'Confirm Swap'}
-                        </>
-                    )}
-                </Button>
+                {(() => {
+                    const userEmodeCategoryId = summary?.eModeCategoryId || 0;
+                    const toAddr = (toToken?.address || toToken?.underlyingAsset || '').toLowerCase();
+                    const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
+                    const isEmodeConflict = userEmodeCategoryId > 0 && toMarketToken && toMarketToken.isBorrowableInCurrentEMode === false;
+
+                    return (
+                        <Button
+                            disabled={isBusy || !swapQuote || swapAmount === BigInt(0) || isInsufficientBalance || isEmodeConflict}
+                            onClick={handleSwap}
+                            className={`w-full py-3 h-auto font-bold rounded-xl mt-2 ${isInsufficientBalance ? 'bg-rose-500 hover:bg-rose-600 border-rose-600 text-white' : ''}`}
+                        >
+                            {isActionLoading ? (
+                                <>
+                                    <RefreshCw className="w-4 h-4 animate-spin" />
+                                    {isSigning ? 'Signing in wallet...' : 'Processing...'}
+                                </>
+                            ) : isInsufficientBalance ? (
+                                'Insufficient Balance'
+                            ) : isEmodeConflict ? (
+                                'E-Mode Conflict'
+                            ) : (
+                                <>
+                                    <ArrowRightLeft className="w-4 h-4" />
+                                    {preferPermit && (forceRequirePermit || !signedPermit) ? 'Sign & Swap' : 'Confirm Swap'}
+                                </>
+                            )}
+                        </Button>
+                    );
+                })()}
             </div>
 
             {/* Token Selector Modal */}
@@ -1604,3 +1555,5 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         </Modal>
     );
 };
+
+export default DebtSwapModal;

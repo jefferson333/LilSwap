@@ -1,9 +1,10 @@
 import { AlertCircle, ArrowDownRight, ArrowUpRight, CircleDashed, ArrowLeftRight, ChevronDown, ChevronUp, ExternalLink, Gift, Network, RefreshCw } from 'lucide-react';
 import React, { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useWeb3 } from '@/contexts/web3-context';
-import { getMarketByChainId, getMarketByKey } from '../constants/networks';
+import { getMarketByKey } from '../constants/networks';
 import type { PositionInfo } from '../hooks/use-all-positions';
 import { useAllPositions } from '../hooks/use-all-positions';
+import { formatUSD, formatCompactToken, formatAPY, formatHF } from '../utils/formatters';
 import { getTokenLogo, onTokenImgError } from '../utils/get-token-logo';
 import logger from '../utils/logger';
 import { toHexChainId } from '../utils/wallet';
@@ -11,7 +12,6 @@ import { DonateModal } from './donate-modal';
 import { InfoTooltip } from './info-tooltip';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
-import { formatUSD, formatCompactNumber, formatCompactToken, formatAPY, formatHF } from '../utils/formatters';
 
 // Lazy load Swap Modals - Note: We'll migrate these next
 const DebtSwapModal = lazy(() => import('./debt-swap-modal').then(module => ({ default: module.DebtSwapModal })));
@@ -217,6 +217,8 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                 supplies: sortedSupplies,
                 borrows: sortedBorrows,
                 marketAssets: info?.marketAssets || [],
+                eModeCategoryId: info?.summary?.eModeCategoryId,
+                eModes: info?.summary?.eModes,
                 error: info?.error
             };
         });
@@ -269,7 +271,7 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                                 </span>
-                                {donator.type?.toLowerCase().includes('partner') ? 'PARTNER Detected!' : 'DONATOR Detected!'}
+                                {donator.type?.toLowerCase().includes('partner') ? 'PARTNER' : 'DONATOR'}
                             </span>
                         </InfoTooltip>
                     </div>
@@ -308,7 +310,7 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                             <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                                         </span>
-                                        {donator.type?.toLowerCase().includes('partner') ? 'PARTNER Detected!' : 'DONATOR Detected!'}
+                                        {donator.type?.toLowerCase().includes('partner') ? 'PARTNER' : 'DONATOR'}
                                     </span>
                                 </InfoTooltip>
                             </div>
@@ -387,25 +389,35 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                             </div>
                         </div>
 
-                        <div className="mt-4 sm:mt-0 flex-1 flex justify-start items-center">
-                            <div className="grid grid-cols-3 gap-2 sm:flex sm:items-center sm:gap-6 w-full">
+                        <div className="mt-3 sm:mt-0 flex-1 flex items-center justify-between">
+                            <div className="flex items-center gap-3 sm:gap-6">
                                 <div className="flex flex-col items-start">
-                                    <span className="text-[11px] sm:text-xs text-slate-400 mb-0.5">Net worth</span>
-                                    <span className="text-base font-mono font-bold text-slate-900 dark:text-white leading-none mt-1">
+                                    <span className="text-[10px] sm:text-xs text-slate-400 leading-none mb-1">Net worth</span>
+                                    <span className="text-sm sm:text-base font-mono font-bold text-slate-900 dark:text-white leading-none">
                                         {formatUSD(chain.netWorthUSD)}
                                     </span>
                                 </div>
-                                <div className="flex flex-col items-start">
-                                    <span className="text-[11px] sm:text-xs text-slate-400 mb-0.5">Net APY</span>
-                                    <span className="text-base font-mono font-bold text-slate-900 dark:text-white leading-none mt-1">
+                                <div className="flex flex-col items-start border-l border-slate-200 dark:border-slate-700/50 pl-3 sm:border-0 sm:pl-0">
+                                    <span className="text-[10px] sm:text-xs text-slate-400 leading-none mb-1">Net APY</span>
+                                    <span className="text-sm sm:text-base font-mono font-bold text-slate-900 dark:text-white leading-none">
                                         {formatAPY(chain.netAPY)}
                                     </span>
                                 </div>
-                                <div className="flex flex-col items-start">
-                                    <span className="text-[11px] sm:text-xs text-slate-400 mb-0.5">Health factor</span>
-                                    <span className={`text-lg font-mono font-bold leading-none mt-1 ${(!chain.healthFactor || chain.healthFactor >= 3 || chain.healthFactor === -1) ? 'text-green-400' : chain.healthFactor >= 1.1 ? 'text-orange-400' : 'text-red-500'}`}>
-                                        {formatHF(chain.healthFactor)}
-                                    </span>
+                                <div className="flex flex-col items-start border-l border-slate-200 dark:border-slate-700/50 pl-3 sm:border-0 sm:pl-0">
+                                    <span className="text-[10px] sm:text-xs text-slate-400 leading-none mb-1">Health factor</span>
+                                    <div className="flex items-center gap-3">
+                                        <span className={`text-base sm:text-lg font-mono font-bold leading-none ${(!chain.healthFactor || chain.healthFactor >= 3 || chain.healthFactor === -1) ? 'text-green-400' : chain.healthFactor >= 1.1 ? 'text-orange-400' : 'text-red-500'}`}>
+                                            {formatHF(chain.healthFactor)}
+                                        </span>
+                                        {!!chain.eModeCategoryId && chain.eModeCategoryId !== 0 && (
+                                            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-sky-500/5 dark:bg-sky-400/5 border border-sky-500/20 dark:border-sky-400/20 shrink-0">
+                                                <div className="w-1 h-1 rounded-full bg-sky-500/60 dark:bg-sky-400/60 shadow-[0_0_5px_rgba(14,165,233,0.3)] animate-pulse" />
+                                                <span className="text-[10px] font-bold text-sky-600/80 dark:text-sky-400/80 uppercase tracking-wide leading-none">
+                                                    E-Mode
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -416,7 +428,7 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                     </div>
 
                     {openMarket === chain.marketKey && (
-                        <div className="border-t border-border-light dark:border-border-dark px-4 pt-4 pb-0 bg-slate-50/80 dark:bg-slate-950/40 flex flex-col md:flex-row gap-6 transition-colors duration-300">
+                        <div className="border-t border-border-light dark:border-border-dark px-4 pt-3 pb-0 bg-slate-50/80 dark:bg-slate-950/40 flex flex-col md:flex-row gap-6 transition-colors duration-300">
                             <div className="w-full">
                                 <div className="md:hidden space-y-4">
                                     <div>
@@ -451,33 +463,70 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                             <div className="flex items-center gap-2 mb-2 ml-1">
                                                 <ArrowDownRight className="w-3 h-3 text-primary" />
                                                 <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest leading-none">Borrows</h4>
+                                                {!!chain.eModeCategoryId && chain.eModeCategoryId !== 0 && (
+                                                    <div className="flex items-center gap-1 px-1.5 py-0 rounded bg-sky-100 dark:bg-sky-900/30 border border-sky-200 dark:border-sky-800">
+                                                        <div className="w-1 h-1 rounded-full bg-sky-500 animate-pulse" />
+                                                        <span className="text-[9px] font-black text-sky-700 dark:text-sky-400 uppercase tracking-wider">
+                                                            E-Mode: {chain.eModes?.find((m: any) => m.id === chain.eModeCategoryId)?.label || 'Active'}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
                                             <div className="-mx-4 border-x border-t border-slate-200 dark:border-slate-700/80 divide-y divide-slate-200 dark:divide-slate-700/80">
-                                                {chain.borrows.map((borrow) => (
-                                                    <div key={`mobile-borrow-${borrow.underlyingAsset}`} className="px-4 py-2.5 bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors duration-200">
-                                                        <div className="flex items-center justify-between gap-3">
-                                                            <div className="flex items-center gap-3 min-w-0">
-                                                                <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
-                                                                    <img src={getTokenLogo(borrow.symbol)} alt={borrow.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(borrow.symbol)(e as any)} />
+                                                {chain.borrows.map((borrow) => {
+                                                    const borrowAddr = borrow.underlyingAsset.toLowerCase();
+                                                    const hasAlternatives = (chain.marketAssets || []).some(
+                                                        (a: any) => a.canBeDebtSwapDestination &&
+                                                            (a.address || a.underlyingAsset || '').toLowerCase() !== borrowAddr
+                                                    );
+
+                                                    return (
+                                                        <div key={`mobile-borrow-${borrow.underlyingAsset}`} className="px-4 py-2.5 bg-white dark:bg-slate-800/60 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors duration-200">
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <div className="flex items-center gap-3 min-w-0">
+                                                                    <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700/50 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-600/30">
+                                                                        <img src={getTokenLogo(borrow.symbol)} alt={borrow.symbol} className="w-full h-full object-cover" onError={(e) => onTokenImgError(borrow.symbol)(e as any)} />
+                                                                    </div>
+                                                                    <div className="min-w-0">
+                                                                        <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(borrow.formattedAmount) * parseFloat(borrow.priceInUSD || '0'))}</div>
+                                                                        <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(borrow.formattedAmount, borrow.symbol)}</div>
+                                                                    </div>
                                                                 </div>
-                                                                <div className="min-w-0">
-                                                                    <div className="font-mono text-base font-bold text-slate-900 dark:text-white truncate">{formatUSD(parseFloat(borrow.formattedAmount) * parseFloat(borrow.priceInUSD || '0'))}</div>
-                                                                    <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(borrow.formattedAmount, borrow.symbol)}</div>
-                                                                </div>
+                                                                {hasAlternatives ? (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="default"
+                                                                        onClick={() => handleOpenSwap(chain.marketKey, borrow, chain.marketAssets, chain.borrows, [], false)}
+                                                                        className="gap-2 rounded-lg shrink-0 transition-all duration-200 bg-primary hover:bg-primary/90 text-white shadow-sm"
+                                                                    >
+                                                                        <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
+                                                                    </Button>
+                                                                ) : (
+                                                                    <InfoTooltip message="No alternative tokens available in your E-Mode category" disableClick={true}>
+                                                                        <div className="cursor-not-allowed flex">
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant="secondary"
+                                                                                tabIndex={-1}
+                                                                                className="gap-2 rounded-lg shrink-0 transition-all duration-200 cursor-not-allowed bg-slate-100/80 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 shadow-none pointer-events-none"
+                                                                            >
+                                                                                <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
+                                                                            </Button>
+                                                                        </div>
+                                                                    </InfoTooltip>
+                                                                )}
                                                             </div>
-                                                            <Button size="sm" onClick={() => handleOpenSwap(chain.marketKey, borrow, chain.marketAssets, chain.borrows, [], false)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
-                                                                <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
-                                                            </Button>
                                                         </div>
-                                                    </div>
-                                                ))}
+                                                    );
+                                                })}
+
                                             </div>
                                         </div>
                                     )}
                                 </div>
 
                                 <div className="hidden md:block">
-                                    <div className="grid grid-cols-2 gap-6 mb-3">
+                                    <div className="grid grid-cols-2 gap-6 mb-2">
                                         <div className="flex items-center gap-2 px-1">
                                             <ArrowUpRight className="w-3 h-3 text-emerald-500" />
                                             <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Supplies</h4>
@@ -485,6 +534,14 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                         <div className="flex items-center gap-2 px-1">
                                             <ArrowDownRight className="w-3 h-3 text-primary" />
                                             <h4 className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest">Borrows</h4>
+                                            {!!chain.eModeCategoryId && chain.eModeCategoryId !== 0 && (
+                                                <div className="flex items-center gap-1 px-1.5 py-0 rounded bg-sky-100 dark:bg-sky-900/30 border border-sky-200 dark:border-sky-800">
+                                                    <div className="w-1 h-1 rounded-full bg-sky-500 animate-pulse" />
+                                                    <span className="text-[9px] font-black text-sky-700 dark:text-sky-400 uppercase tracking-wider">
+                                                        E-Mode: {chain.eModes?.find((m: any) => m.id === chain.eModeCategoryId)?.label || 'Active'}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     {(() => {
@@ -530,6 +587,11 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                     {chain.borrows.length > 0 ? (
                                                         chain.borrows.map((borrow, index) => {
                                                             const isAtBottom = index === maxLen - 1;
+                                                            const borrowAddr = borrow.underlyingAsset.toLowerCase();
+                                                            const hasAlternatives = (chain.marketAssets || []).some(
+                                                                (a: any) => a.canBeDebtSwapDestination &&
+                                                                    (a.address || a.underlyingAsset || '').toLowerCase() !== borrowAddr
+                                                            );
 
                                                             return (
                                                                 <div key={`${chain.marketKey}-borrow-${index}`} className={`px-4 py-2.5 transition-colors duration-300 hover:bg-slate-50 dark:hover:bg-slate-700/40 ${!isAtBottom ? 'border-b border-slate-200 dark:border-slate-700/80' : ''}`}>
@@ -543,9 +605,29 @@ export const PositionsAccordion: React.FC<PositionsAccordionProps> = ({ walletAd
                                                                                 <div className="text-[10px] text-slate-500 font-medium truncate">{formatCompactToken(parseFloat(borrow.formattedAmount), borrow.symbol)}</div>
                                                                             </div>
                                                                         </div>
-                                                                        <Button size="sm" onClick={() => handleOpenSwap(chain.marketKey, borrow, chain.marketAssets, chain.borrows, [], false)} className="bg-primary hover:bg-primary/90 text-white gap-2 rounded-lg shrink-0">
-                                                                            <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
-                                                                        </Button>
+                                                                        {hasAlternatives ? (
+                                                                            <Button
+                                                                                size="sm"
+                                                                                variant="default"
+                                                                                onClick={() => handleOpenSwap(chain.marketKey, borrow, chain.marketAssets, chain.borrows, [], false)}
+                                                                                className="gap-2 rounded-lg shrink-0 transition-all duration-200 bg-primary hover:bg-primary/90 text-white shadow-sm"
+                                                                            >
+                                                                                <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
+                                                                            </Button>
+                                                                        ) : (
+                                                                            <InfoTooltip message="No alternative tokens available in your E-Mode category" disableClick={true}>
+                                                                                <div className="cursor-not-allowed flex">
+                                                                                    <Button
+                                                                                        size="sm"
+                                                                                        variant="secondary"
+                                                                                        tabIndex={-1}
+                                                                                        className="gap-2 rounded-lg shrink-0 transition-all duration-200 cursor-not-allowed bg-slate-100/80 dark:bg-slate-800/50 text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 shadow-none pointer-events-none"
+                                                                                    >
+                                                                                        <ArrowLeftRight className="w-3.5 h-3.5" /> Swap
+                                                                                    </Button>
+                                                                                </div>
+                                                                            </InfoTooltip>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             );

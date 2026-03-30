@@ -4,7 +4,7 @@ import logger from '../utils/logger';
 
 // Axios instance configured to point to the Laravel BFF Proxy
 export const apiClient = axios.create({
-    baseURL: (import.meta as any).env.VITE_API_URL || '/',
+    baseURL: '/',
     headers: {
         'Content-Type': 'application/json',
         'X-Requested-With': 'XMLHttpRequest', // Standard for Laravel/Inertia
