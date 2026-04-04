@@ -110,7 +110,7 @@ export const TransactionTrackerProvider: React.FC<{ children: ReactNode }> = ({ 
             setHasMore(true);
             setSheetOpen(false);
 
-            // Clean local transactions on account switch if needed, 
+            // Clean local transactions on account switch if needed,
             // but we start empty now anyway.
             setTransactions([]);
 
@@ -207,7 +207,17 @@ export const TransactionTrackerProvider: React.FC<{ children: ReactNode }> = ({ 
                     }
 
                     const provider = createRpcProvider(market.rpcUrls, tx.chainId);
-                    const receipt = await provider.getTransactionReceipt({ hash: tx.hash as Hex });
+                    let receipt = null;
+                    try {
+                        receipt = await provider.getTransactionReceipt({ hash: tx.hash as Hex });
+                    } catch (err: any) {
+                        // Special handling for indexing delays
+                        if (err.name === 'TransactionReceiptNotFoundError' || err.message?.includes('not found')) {
+                            // logger.debug(`[TransactionTracker] Receipt not found yet for ${tx.hash}, retrying...`);
+                            continue;
+                        }
+                        throw err; // Re-throw other errors
+                    }
 
                     if (receipt) {
                         const isSuccess = receipt.status === 'success';

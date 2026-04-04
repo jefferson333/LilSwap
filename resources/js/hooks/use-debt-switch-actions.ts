@@ -13,6 +13,7 @@ import { ABIS } from '../constants/abis';
 import { ADDRESSES } from '../constants/addresses';
 import { DEFAULT_NETWORK } from '../constants/networks';
 import { buildDebtSwapTx } from '../services/api';
+import logger from '../utils/logger';
 import { recordTransactionHash, confirmTransactionOnChain, rejectTransaction } from '../services/transactions-api';
 import { isUserRejectedError } from '../utils/logger';
 import { calcApprovalAmount } from '../utils/swap-math';
@@ -38,6 +39,12 @@ interface UseDebtSwitchActionsProps {
     marketKey?: string | null;
     onTxSent?: (hash: string) => void;
     freezeQuote?: boolean;
+    onSignatureCached?: (sig: any) => void;
+    cachedPermit?: any | null;
+    adapterAddress?: string | null;
+    debtTokenAddress?: string | null;
+    preFetchedNonce?: bigint | null;
+    preFetchedTokenName?: string | null;
 }
 
 export const useDebtSwitchActions = ({
@@ -59,6 +66,12 @@ export const useDebtSwitchActions = ({
     marketKey = null,
     onTxSent,
     freezeQuote = false,
+    onSignatureCached,
+    cachedPermit,
+    adapterAddress: providedAdapterAddress,
+    debtTokenAddress: providedDebtTokenAddress,
+    preFetchedNonce,
+    preFetchedTokenName,
 }: UseDebtSwitchActionsProps) => {
     const publicClient = usePublicClient();
     const { data: walletClient } = useWalletClient();
@@ -108,13 +121,14 @@ export const useDebtSwitchActions = ({
     const targetNetwork = selectedNetwork || DEFAULT_NETWORK;
     const networkAddresses = targetNetwork.addresses || ADDRESSES;
     const adapterAddress = useMemo(() => {
+        if (providedAdapterAddress) return providedAdapterAddress;
         if (!networkAddresses?.DEBT_SWAP_ADAPTER) return null;
         try {
             return getAddress(networkAddresses.DEBT_SWAP_ADAPTER);
         } catch {
             return null;
         }
-    }, [networkAddresses?.DEBT_SWAP_ADAPTER]);
+    }, [providedAdapterAddress, networkAddresses?.DEBT_SWAP_ADAPTER]);
 
     const chainId = targetNetwork.chainId;
 
@@ -147,14 +161,14 @@ export const useDebtSwitchActions = ({
     const generateAndCachePermit = useCallback(async (debtTokenAddr: string) => {
         if (!walletClient || !account) return null;
         try {
-            const nonce = await publicClient?.readContract({
+            const nonce = (preFetchedNonce !== null && preFetchedNonce !== undefined) ? preFetchedNonce : await publicClient?.readContract({
                 address: getAddress(debtTokenAddr),
                 abi: parseAbi(ABIS.DEBT_TOKEN),
                 functionName: 'nonces',
                 args: [getAddress(account)],
             }) as bigint;
 
-            const name = await publicClient?.readContract({
+            const name = preFetchedTokenName || await publicClient?.readContract({
                 address: getAddress(debtTokenAddr),
                 abi: parseAbi(ABIS.DEBT_TOKEN),
                 functionName: 'name',
@@ -188,7 +202,10 @@ export const useDebtSwitchActions = ({
             const v = parseInt(signature.substring(130, 132), 16);
 
             const permitParams = { amount: value, deadline: Number(deadline), v, r, s };
-            setSignedPermit({ params: permitParams, token: debtTokenAddr, deadline: Number(deadline), value });
+            const sigData = { params: permitParams, token: debtTokenAddr, deadline: Number(deadline), value };
+            
+            setSignedPermit(sigData);
+            onSignatureCached?.(sigData);
             setForceRequirePermit(false);
 
             return permitParams;
@@ -200,7 +217,7 @@ export const useDebtSwitchActions = ({
         }
     }, [account, walletClient, publicClient, adapterAddress, chainId, addLog]);
 
-    const handleApproveDelegation = useCallback(async (preferPermitOverride?: boolean) => {
+    const handleApproveDelegation = useCallback(async (preferPermitOverride?: boolean, skipNetworkCheck?: boolean, debtTokenAddressOverride?: string) => {
         const preferPermitFinal = typeof preferPermitOverride === 'boolean' ? preferPermitOverride : preferPermit;
         if (!walletClient || !toToken || !adapterAddress || !account) return;
 
@@ -208,7 +225,11 @@ export const useDebtSwitchActions = ({
             setIsActionLoading(true);
             setIsSigning(true);
             
-            let debtTokenAddress = toToken.variableDebtTokenAddress;
+            if (!skipNetworkCheck) {
+                if (!(await ensureWalletNetwork())) return;
+            }
+
+            let debtTokenAddress = debtTokenAddressOverride || providedDebtTokenAddress || toToken.variableDebtTokenAddress;
             if (!debtTokenAddress || debtTokenAddress === zeroAddress) {
                 const toReserveData = await publicClient?.readContract({
                     address: getAddress(networkAddresses.POOL),
@@ -277,13 +298,12 @@ export const useDebtSwitchActions = ({
 
             const { priceRoute, srcAmount, fromToken: qFrom, toToken: qTo } = activeQuote;
             const srcAmountBigInt = BigInt(srcAmount);
-            const bufferBps = activeQuote?.bufferBps || 50;
+            const bufferBps = 100; // ALWAYS 1% buffer for safety during execution
             const maxNewDebt = calcApprovalAmount(srcAmountBigInt, bufferBps);
             const exactDebtRepayAmount = activeQuote.destAmount;
 
             let permitParams = { amount: 0n, deadline: 0, v: 0, r: zeroHash as Hex, s: zeroHash as Hex };
-            let newDebtTokenAddr = qTo.variableDebtTokenAddress;
-
+            let newDebtTokenAddr = providedDebtTokenAddress || qTo.variableDebtTokenAddress;
             if (!newDebtTokenAddr || newDebtTokenAddr === zeroAddress) {
                 const toReserveData = await publicClient?.readContract({
                     address: getAddress(networkAddresses.POOL),
@@ -294,12 +314,19 @@ export const useDebtSwitchActions = ({
                 newDebtTokenAddr = toReserveData.variableDebtTokenAddress || toReserveData[11];
             }
 
+            logger.debug(`[useDebtSwitchActions] Allowance Check | Allowance: ${allowance.toString()} | Required: ${maxNewDebt.toString()} | PreferPermit: ${preferPermit}`);
+
             if (allowance < maxNewDebt || forceRequirePermit) {
                 if (forceRequirePermit || preferPermit) {
-                    if (signedPermit && !forceRequirePermit && signedPermit.token === newDebtTokenAddr && signedPermit.deadline > Math.floor(Date.now() / 1000) && signedPermit.value >= maxNewDebt) {
-                        permitParams = signedPermit.params;
+                    const effectiveSignedPermit = signedPermit || cachedPermit;
+
+                    if (effectiveSignedPermit && !forceRequirePermit && 
+                        getAddress(effectiveSignedPermit.token) === getAddress(newDebtTokenAddr) && 
+                        effectiveSignedPermit.deadline > Math.floor(Date.now() / 1000) && 
+                        effectiveSignedPermit.value >= maxNewDebt) {
+                        permitParams = effectiveSignedPermit.params;
                     } else {
-                        const res = await handleApproveDelegation(true);
+                        const res = await handleApproveDelegation(forceRequirePermit || preferPermit, true, newDebtTokenAddr);
                         setIsActionLoading(true);
                         if (res?.permit) {
                             permitParams = res.permit;
@@ -308,7 +335,7 @@ export const useDebtSwitchActions = ({
                         }
                     }
                 } else {
-                    await handleApproveDelegation(false);
+                    await handleApproveDelegation(false, true, newDebtTokenAddr);
                     setIsActionLoading(true);
                     await new Promise(r => setTimeout(r, 1500));
                     fetchDebtData();
@@ -399,7 +426,7 @@ export const useDebtSwitchActions = ({
             setIsActionLoading(false);
             updateCurrentTransactionId(null);
         }
-    }, [account, walletClient, publicClient, allowance, swapAmount, debtBalance, swapQuote, fetchQuote, addLog, slippage, adapterAddress, networkAddresses, chainId, ensureWalletNetwork, preferPermit, forceRequirePermit, handleApproveDelegation, onTxSent, currentTransactionId, clearQuoteError, clearQuote, fetchDebtData, marketKey || '', targetNetwork?.key || '']);
+    }, [account, walletClient, publicClient, allowance, swapAmount, debtBalance, swapQuote, fetchQuote, addLog, slippage, providedAdapterAddress, providedDebtTokenAddress, preFetchedNonce, preFetchedTokenName, networkAddresses, chainId, ensureWalletNetwork, preferPermit, forceRequirePermit, handleApproveDelegation, onTxSent, currentTransactionId, clearQuoteError, clearQuote, fetchDebtData, marketKey || '', targetNetwork?.key || '']);
 
     return {
         isActionLoading, isSigning, signedPermit, forceRequirePermit, txError, lastAttemptedQuote, userRejected,

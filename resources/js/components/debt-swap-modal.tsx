@@ -11,6 +11,13 @@ import {
     AlertCircle,
 } from 'lucide-react';
 import React, { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { usePublicClient } from 'wagmi';
+import { ABIS } from '../constants/abis';
+import { ADDRESSES } from '../constants/addresses';
+import { MARKETS, DEFAULT_MARKET } from '../constants/networks';
+import { getAddress, parseAbi } from 'viem';
+import { useApprovalState } from '../hooks/use-approval-state';
+import { calcApprovalAmount } from '../utils/swap-math';
 
 
 import { useWeb3 } from '@/contexts/web3-context';
@@ -84,13 +91,22 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
     const [showMethodMenu, setShowMethodMenu] = useState(false);
     const [isPairValidationRunning, setIsPairValidationRunning] = useState(false);
     const [isUSDMode, setIsUSDMode] = useState(false);
+    const [toDebtTokenAddress, setToDebtTokenAddress] = useState<string | null>(null);
+    const publicClient = usePublicClient();
 
     // Refs
     const methodMenuRef = useRef<HTMLDivElement>(null);
+    const slippageMenuRef = useRef<HTMLDivElement>(null);
     const prevFromTokenAddrRef = useRef('');
     const validatingPairsRef = useRef<Set<string>>(new Set());
     const prevalidationBudgetRef = useRef(0);
     const lastToastErrorRef = useRef<string | null>(null);
+
+    // Derived values needed for hooks
+    const adapterAddress = useMemo(() => {
+        const market = MARKETS[effectiveNetwork.key as keyof typeof MARKETS] || DEFAULT_MARKET;
+        return market.addresses.DEBT_SWAP_ADAPTER;
+    }, [effectiveNetwork]);
 
     // --- Actions ---
 
@@ -122,6 +138,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         enabled: isOpen,
         freezeQuote,
         marketAssets: localMarketAssets,
+        adapterAddress,
     });
 
     // --- Computed Values ---
@@ -160,6 +177,82 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         return borrow?.formattedAmount || '0';
     }, [fromToken, activeDebtAssets]);
 
+    // Resolve ToToken's Debt Token Address
+    useEffect(() => {
+        let isMounted = true;
+
+        async function fetchToDebtAddress() {
+            if (!toToken || !effectiveNetwork || !publicClient) {
+                setToDebtTokenAddress(null);
+                return;
+            }
+
+            const directDebtTokenAddress = toToken.variableDebtTokenAddress || null;
+            if (directDebtTokenAddress) {
+                setToDebtTokenAddress(directDebtTokenAddress);
+                return;
+            }
+
+            try {
+                const clientChainId = await publicClient.getChainId();
+                if (clientChainId !== effectiveNetwork.chainId) {
+                    // Wallet/RPC chain not aligned yet; skip lookup until chain settles.
+                    return;
+                }
+
+                const market = MARKETS[effectiveNetwork.key as keyof typeof MARKETS] || DEFAULT_MARKET;
+                const dataProviderAddr = market.addresses.DATA_PROVIDER;
+                if (!dataProviderAddr) return;
+
+                const bytecode = await publicClient.getBytecode({
+                    address: getAddress(dataProviderAddr),
+                });
+                if (!bytecode || bytecode === '0x') {
+                    return;
+                }
+
+                const data = await publicClient.readContract({
+                    address: getAddress(dataProviderAddr),
+                    abi: parseAbi(ABIS.DATA_PROVIDER),
+                    functionName: 'getReserveTokensAddresses',
+                    args: [getAddress(toToken.underlyingAsset || toToken.address || '')],
+                }) as any;
+
+                if (isMounted && data && (data.variableDebtTokenAddress || data[2])) {
+                    setToDebtTokenAddress(data.variableDebtTokenAddress || data[2]);
+                }
+            } catch (err: any) {
+                const msg = String(err?.message || '');
+                if (msg.includes('returned no data') || msg.includes('Cannot decode zero data')) {
+                    logger.debug('[DebtSwapModal] toDebtAddress unavailable for selected token/network (non-fatal).');
+                    return;
+                }
+                logger.warn('[DebtSwapModal] Error fetching toDebtAddress:', err);
+            }
+        }
+
+        fetchToDebtAddress();
+        return () => { isMounted = false; };
+    }, [toToken, effectiveNetwork, publicClient]);
+
+
+    // Use Approval Hook for ToToken Debt
+    const {
+        onChainAllowance,
+        nonce: preFetchedNonce,
+        tokenName: preFetchedTokenName,
+        isApproved,
+        saveSignature,
+        cachedSignature
+    } = useApprovalState({
+        account,
+        tokenAddress: toDebtTokenAddress,
+        spenderAddress: adapterAddress,
+        amountRequired: swapAmount, // We'll add buffer later in actions, but this gives a good indicator
+        isDebt: true,
+        chainId: effectiveNetwork.chainId
+    });
+
     const {
         isActionLoading,
         isSigning,
@@ -174,7 +267,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         account,
         fromToken,
         toToken,
-        allowance: BigInt(0), // Debt swap usually handles its own allowance/permit checks
+        allowance: onChainAllowance,
         swapAmount,
         debtBalance,
         swapQuote,
@@ -187,7 +280,12 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         selectedNetwork: effectiveNetwork,
         marketKey: initialMarketKey || effectiveNetwork?.key,
         preferPermit,
-        freezeQuote,
+        adapterAddress,
+        debtTokenAddress: toDebtTokenAddress,
+        preFetchedNonce,
+        preFetchedTokenName,
+        onSignatureCached: saveSignature,
+        cachedPermit: cachedSignature,
         onTxSent: (hash: string) => {
             const amountDisplay = isUSDMode ? (inputValue ? `$${inputValue}` : '') : (inputValue ? `${inputValue} ${fromToken.symbol}` : '');
 
@@ -577,10 +675,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
         // 3. Block selecting the same token
         if (selectingForFrom) {
-            if (toToken && (toToken.address || toToken.underlyingAsset || '').toLowerCase() === tokenAddr) {
-                disabled = true;
-                reasons.push('Already selected as destination');
-            }
+            // No labels or disabling for the source list — all positions are always shown.
         } else { // selecting for toToken
             if (fromToken && (fromToken.address || fromToken.underlyingAsset || '').toLowerCase() === tokenAddr) {
                 disabled = true;
@@ -604,7 +699,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
     const oppositeToken = selectingForFrom ? toToken : fromToken;
     const filteredSelectorTokens = useMemo(() => {
         let list = selectorTokens;
-        if (oppositeToken) {
+        if (oppositeToken && !selectingForFrom) {
             const oppositeAddr = (oppositeToken.address || oppositeToken.underlyingAsset || '').toLowerCase();
             list = list.filter((t) => (t.address || t.underlyingAsset || '').toLowerCase() !== oppositeAddr);
         }
@@ -618,7 +713,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                 const addr = (t.address || t.underlyingAsset || '').toLowerCase();
                 const m = (localMarketAssets || []).find(ma => (ma.address || ma.underlyingAsset || '').toLowerCase() === addr);
                 if (!m) return false;
-                
+
                 // For Debt Swap, the destination must be a valid borrowable asset per the backend
                 return m.canBeDebtSwapDestination === true;
             });
@@ -626,7 +721,6 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
         return list;
     }, [selectorTokens, oppositeToken, selectingForFrom, summary?.eModeCategoryId, localMarketAssets]);
-    const slippageMenuRef = useRef<HTMLDivElement>(null);
 
 
     return (
@@ -1294,17 +1388,17 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
                     const toAddr = (toToken.underlyingAsset || toToken.address || '').toLowerCase();
                     const toMarketToken = (localMarketAssets || []).find(m => (m.underlyingAsset || m.address || '').toLowerCase() === toAddr);
-                    
+
                     const currentHfRaw = parseFloat(summary.healthFactor || '0');
                     const currentHf = (isNaN(currentHfRaw) || currentHfRaw > 100) ? -1 : currentHfRaw;
 
                     let simulatedHf = currentHf;
                     if (swapQuote && swapQuote.srcAmount && swapQuote.destAmount) {
-                         try {
+                        try {
                             const currentTotalCollateralUSD = parseFloat(summary.totalCollateralUSD) || 0;
                             const currentLiquidationThreshold = parseFloat(summary.currentLiquidationThreshold) || 0;
                             const currentTotalBorrowsUSD = parseFloat(summary.totalBorrowsUSD) || 0;
-                            
+
                             const repaidDebtUsd = parseFloat(swapQuote.destUSD || '0');
                             const newDebtUsd = parseFloat(swapQuote.srcUSD || '0');
                             const simulatedTotalBorrowsUSD = Math.max(0, currentTotalBorrowsUSD - repaidDebtUsd + newDebtUsd);
@@ -1314,7 +1408,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                             } else {
                                 simulatedHf = -1;
                             }
-                        } catch {}
+                        } catch { }
                     }
 
                     const alerts: Array<{ label: string; message: string; isDanger: boolean }> = [];
@@ -1517,7 +1611,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                             ) : (
                                 <>
                                     <ArrowRightLeft className="w-4 h-4" />
-                                    {preferPermit && (forceRequirePermit || !signedPermit) ? 'Sign & Swap' : 'Confirm Swap'}
+                                    {preferPermit && !isApproved ? 'Sign & Swap' : 'Confirm Swap'}
                                 </>
                             )}
                         </Button>
@@ -1539,6 +1633,23 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
                         if (selectingForFrom) {
                             setFromToken(token);
                             saveTokenSelection(marketKey, 'debt-from', tokenAddr);
+
+                            // If we selected a token that is currently set as 'toToken',
+                            // auto-advance toToken to avoid collision errors.
+                            if (toToken && (toToken.address || toToken.underlyingAsset || '').toLowerCase() === tokenAddr.toLowerCase()) {
+                                const nextValidTo = localMarketAssets.find(m =>
+                                    (m.address || m.underlyingAsset || '').toLowerCase() !== tokenAddr.toLowerCase() &&
+                                    m.canBeDebtSwapDestination === true
+                                );
+                                if (nextValidTo) {
+                                    setToToken(nextValidTo);
+                                    saveTokenSelection(marketKey, 'debt', (nextValidTo.address || nextValidTo.underlyingAsset || '').toLowerCase());
+                                }
+                            }
+
+                            // Reset input when source token changes to avoid errors with previous values
+                            setSwapAmount(BigInt(0));
+                            setInputValue('');
                         } else {
                             setToToken(token);
                             saveTokenSelection(marketKey, 'debt', tokenAddr);

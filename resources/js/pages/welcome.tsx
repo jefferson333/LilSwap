@@ -199,7 +199,7 @@ export default function Welcome() {
                                             <Popover>
                                                 <PopoverTrigger asChild>
                                                     <button
-                                                        className="bg-slate-100 dark:bg-slate-800/60 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-800 dark:text-white text-xs sm:text-sm font-bold px-3 sm:px-4 rounded-xl flex items-center gap-2 transition-all border border-border-light dark:border-border-dark active:scale-95 shadow-sm overflow-hidden min-w-[140px] h-[40px] justify-center"
+                                                        className="bg-slate-100 dark:bg-slate-800/60 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-800 dark:text-white text-xs sm:text-sm font-bold px-3 sm:px-4 rounded-xl flex items-center gap-2 transition-all border border-border-light dark:border-border-dark active:scale-95 shadow-sm overflow-hidden min-w-35 h-10 justify-center"
                                                     >
                                                         <Wallet className="w-4 h-4 text-primary shrink-0" />
                                                         <span className={`hidden sm:inline font-mono transition-all duration-300 ${!showAddress ? 'blur-xs select-none opacity-60' : ''}`}>
@@ -208,14 +208,14 @@ export default function Welcome() {
                                                         <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
                                                     </button>
                                                 </PopoverTrigger>
-                                                <PopoverContent 
-                                                    align="end" 
+                                                <PopoverContent
+                                                    align="end"
                                                     sideOffset={6}
-                                                    className="w-[var(--radix-popover-trigger-width)] p-0 bg-white dark:bg-slate-900 border-border-light dark:border-border-dark shadow-xl rounded-xl overflow-hidden"
+                                                    className="w-(--radix-popover-trigger-width) p-0 bg-white dark:bg-slate-900 border-border-light dark:border-border-dark shadow-xl rounded-xl overflow-hidden"
                                                 >
                                                     <button
                                                         onClick={() => disconnect()}
-                                                        className="w-full h-[40px] flex items-center justify-center gap-2.5 px-3 text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors group"
+                                                        className="w-full h-10 flex items-center justify-center gap-2.5 px-3 text-sm font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors group"
                                                     >
                                                         <LogOut className="w-4 h-4 transition-transform group-hover:scale-110" />
                                                         Disconnect

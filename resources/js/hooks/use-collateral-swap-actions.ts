@@ -2,6 +2,7 @@ import {
     getAddress,
     formatUnits,
     parseAbi,
+    parseSignature,
     zeroAddress,
     encodeAbiParameters,
     decodeEventLog,
@@ -39,6 +40,8 @@ interface UseCollateralSwapActionsProps {
     forceRequirePermitOverride?: boolean;
     marketKey?: string | null;
     onTxSent?: (hash: string) => void;
+    adapterAddress?: string | null;
+    aTokenAddress?: string | null;
 }
 
 export const useCollateralSwapActions = ({
@@ -61,6 +64,8 @@ export const useCollateralSwapActions = ({
     preferPermit = true,
     marketKey = null,
     onTxSent,
+    adapterAddress: providedAdapterAddress,
+    aTokenAddress: providedATokenAddress,
 }: UseCollateralSwapActionsProps) => {
     const publicClient = usePublicClient();
     const { data: walletClient } = useWalletClient();
@@ -98,13 +103,14 @@ export const useCollateralSwapActions = ({
     const targetNetwork = selectedNetwork || DEFAULT_NETWORK;
     const networkAddresses = targetNetwork.addresses || ADDRESSES;
     const adapterAddress = useMemo(() => {
+        if (providedAdapterAddress) return providedAdapterAddress;
         if (!networkAddresses?.SWAP_COLLATERAL_ADAPTER) return null;
         try {
             return getAddress(networkAddresses.SWAP_COLLATERAL_ADAPTER);
         } catch {
             return null;
         }
-    }, [networkAddresses?.SWAP_COLLATERAL_ADAPTER]);
+    }, [providedAdapterAddress, networkAddresses?.SWAP_COLLATERAL_ADAPTER]);
 
     const chainId = targetNetwork.chainId;
 
@@ -146,18 +152,28 @@ export const useCollateralSwapActions = ({
     const generateAndCachePermit = useCallback(async (aTokenAddr: string, exactAmount?: bigint) => {
         if (!walletClient || !account) return null;
         try {
-            const nonce = await publicClient?.readContract({
-                address: getAddress(aTokenAddr),
-                abi: parseAbi(ABIS.DEBT_TOKEN),
-                functionName: 'nonces',
-                args: [getAddress(account)],
-            }) as bigint;
+            let nonce: bigint;
+            let name: string;
 
-            const name = await publicClient?.readContract({
-                address: getAddress(aTokenAddr),
-                abi: parseAbi(ABIS.DEBT_TOKEN),
-                functionName: 'name',
-            }) as string;
+            try {
+                nonce = await publicClient?.readContract({
+                    address: getAddress(aTokenAddr),
+                    abi: parseAbi(ABIS.ERC20),
+                    functionName: 'nonces',
+                    args: [getAddress(account)],
+                }) as bigint;
+
+                name = await publicClient?.readContract({
+                    address: getAddress(aTokenAddr),
+                    abi: parseAbi(ABIS.ERC20),
+                    functionName: 'name',
+                }) as string;
+            } catch (readErr: any) {
+                const noPermitErr: any = new Error('Token does not support EIP-2612 permit; use on-chain approve');
+                noPermitErr.code = 'NO_PERMIT';
+                noPermitErr.cause = readErr;
+                throw noPermitErr;
+            }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
             const value = exactAmount || BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -183,18 +199,33 @@ export const useCollateralSwapActions = ({
                 message,
             });
 
-            // Parse signature (v, r, s)
-            const r = `0x${signature.substring(2, 66)}` as Hex;
-            const s = `0x${signature.substring(66, 130)}` as Hex;
-            const v = parseInt(signature.substring(130, 132), 16);
+            // Keep parity with ethers.Signature.from(): robustly parse and normalize v to 27/28.
+            const parsedSig = parseSignature(signature);
+            const r = parsedSig.r as Hex;
+            const s = parsedSig.s as Hex;
+            let v = Number(parsedSig.v ?? (parsedSig.yParity === 0 ? 27n : 28n));
+            if (v < 27) v += 27;
+
+            logger.debug('[useCollateralSwapActions] Permit signature parsed', {
+                chainId,
+                token: aTokenAddr,
+                signatureLength: signature?.length,
+                v,
+            });
 
             const permitParams = { amount: value, deadline: Number(deadline), v, r, s };
-            setSignedPermit({ params: permitParams, token: aTokenAddr, deadline: Number(deadline), value });
+            const sigData = { params: permitParams, token: aTokenAddr, deadline: Number(deadline), value };
+
+            setSignedPermit(sigData);
             setForceRequirePermit(false);
 
             addLog?.('Signature received and cached', 'success');
             return permitParams;
         } catch (err: any) {
+            if (err?.code === 'NO_PERMIT') {
+                throw err;
+            }
+
             if (isUserRejectedError(err)) {
                 addLog?.('Signature request cancelled.', 'warning');
             } else {
@@ -204,7 +235,7 @@ export const useCollateralSwapActions = ({
         }
     }, [account, walletClient, publicClient, adapterAddress, chainId, addLog]);
 
-    const handleApprove = useCallback(async (preferPermitOverride?: boolean, exactAmount?: bigint) => {
+    const handleApprove = useCallback(async (preferPermitOverride?: boolean, exactAmount?: bigint, skipNetworkCheck?: boolean, aTokenAddressOverride?: string) => {
         const preferPermitFinal = typeof preferPermitOverride === 'boolean' ? preferPermitOverride : preferPermit;
         if (!walletClient || !fromToken || !adapterAddress || !account) return;
 
@@ -212,7 +243,11 @@ export const useCollateralSwapActions = ({
             setIsActionLoading(true);
             setIsSigning(true);
 
-            let aTokenAddress = fromToken.aTokenAddress;
+            if (!skipNetworkCheck) {
+                if (!(await ensureWalletNetwork())) return;
+            }
+
+            let aTokenAddress = aTokenAddressOverride || providedATokenAddress || fromToken.aTokenAddress;
             if (!isValidATokenAddress(aTokenAddress)) {
                 const tokenAddresses = await publicClient?.readContract({
                     address: getAddress(networkAddresses.DATA_PROVIDER),
@@ -229,7 +264,21 @@ export const useCollateralSwapActions = ({
             }
 
             addLog?.('Sending Approval Transaction...');
-            const approveAmount = exactAmount || BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+            const fallbackAmount = swapAmount > 0n
+                ? (swapAmount + (swapAmount * 100n / 10000n) + 1n)
+                : 0n;
+            const approveAmount = exactAmount ?? fallbackAmount;
+
+            if (approveAmount <= 0n) {
+                throw new Error('Invalid approval amount');
+            }
+
+            logger.debug('[useCollateralSwapActions] Sending approve', {
+                chainId,
+                token: aTokenAddress,
+                spender: adapterAddress,
+                amount: approveAmount.toString(),
+            });
 
             const hash = await walletClient.writeContract({
                 account: getAddress(account),
@@ -241,6 +290,20 @@ export const useCollateralSwapActions = ({
 
             addLog?.(`Transaction sent: ${hash}. Waiting for confirmation...`, 'warning');
             await publicClient?.waitForTransactionReceipt({ hash });
+
+            const confirmedAllowance = await publicClient?.readContract({
+                address: getAddress(aTokenAddress),
+                abi: parseAbi(ABIS.ERC20),
+                functionName: 'allowance',
+                args: [getAddress(account), getAddress(adapterAddress)],
+            }) as bigint || 0n;
+
+            logger.debug('[useCollateralSwapActions] Post-approve allowance', {
+                chainId,
+                token: aTokenAddress,
+                spender: adapterAddress,
+                allowance: confirmedAllowance.toString(),
+            });
 
             addLog?.('Approval confirmed!', 'success');
             fetchPositionData();
@@ -256,7 +319,7 @@ export const useCollateralSwapActions = ({
             setIsSigning(false);
             setIsActionLoading(false);
         }
-    }, [walletClient, publicClient, account, fromToken, adapterAddress, networkAddresses, addLog, fetchPositionData, preferPermit, generateAndCachePermit]);
+    }, [walletClient, publicClient, account, fromToken, providedAdapterAddress, providedATokenAddress, networkAddresses, addLog, fetchPositionData, preferPermit, generateAndCachePermit]);
 
     const handleSwap = useCallback(async () => {
         setTxError(null);
@@ -290,7 +353,7 @@ export const useCollateralSwapActions = ({
             const srcAmountBigInt = BigInt(srcAmount);
             let permitParams = { amount: 0n, deadline: 0, v: 0, r: zeroHash as Hex, s: zeroHash as Hex };
 
-            let aTokenAddr = quoteFrom.aTokenAddress;
+            let aTokenAddr = providedATokenAddress || quoteFrom.aTokenAddress;
             if (!isValidATokenAddress(aTokenAddr)) {
                 const tokenAddresses = await publicClient?.readContract({
                     address: getAddress(networkAddresses.DATA_PROVIDER),
@@ -301,38 +364,105 @@ export const useCollateralSwapActions = ({
                 aTokenAddr = tokenAddresses[0] || tokenAddresses.aTokenAddress;
             }
 
+            // Re-read allowance from the resolved aToken to prevent false positives when UI cache was derived from a different token.
+            const effectiveAllowance = await publicClient?.readContract({
+                address: getAddress(aTokenAddr),
+                abi: parseAbi(ABIS.ERC20),
+                functionName: 'allowance',
+                args: [getAddress(account), getAddress(adapterAddress)],
+            }) as bigint || 0n;
+
             const effectivePreferPermit = forceRequirePermit || preferPermit;
-            if (allowance < srcAmountBigInt || forceRequirePermit) {
+
+            logger.debug(`[useCollateralSwapActions] Allowance Check | UI Allowance: ${allowance.toString()} | On-chain aToken Allowance: ${effectiveAllowance.toString()} | Required: ${srcAmountBigInt.toString()} | ForcePermit: ${forceRequirePermit} | PreferPermit: ${preferPermit}`);
+
+            if (effectiveAllowance < srcAmountBigInt || forceRequirePermit) {
                 if (effectivePreferPermit) {
-                    if (signedPermit && !forceRequirePermit && signedPermit.token === aTokenAddr && signedPermit.deadline > Math.floor(Date.now() / 1000) && signedPermit.value >= srcAmountBigInt) {
-                        permitParams = signedPermit.params;
+                    const effectiveSignedPermit = signedPermit;
+
+                    if (effectiveSignedPermit && !forceRequirePermit &&
+                        getAddress(effectiveSignedPermit.token) === getAddress(aTokenAddr) &&
+                        effectiveSignedPermit.deadline > Math.floor(Date.now() / 1000) &&
+                        effectiveSignedPermit.value >= srcAmountBigInt) {
+                        permitParams = effectiveSignedPermit.params;
                     } else {
                         const permitAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
-                        const permitResult = await handleApprove(true, permitAmount);
+                        let permitResult: any = null;
+                        try {
+                            permitResult = await handleApprove(effectivePreferPermit, permitAmount, true, aTokenAddr);
+                        } catch (permitErr: any) {
+                            if (permitErr?.code === 'NO_PERMIT') {
+                                addLog?.('Permit not supported for this token, using on-chain approve...', 'info');
+                                const boundedFallbackAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
+                                await handleApprove(false, boundedFallbackAmount, true, aTokenAddr);
+                                setIsActionLoading(true);
+                                await new Promise(r => setTimeout(r, 1000));
+                                fetchPositionData();
+                                permitResult = null;
+                            } else {
+                                throw permitErr;
+                            }
+                        }
+
                         setIsActionLoading(true);
-                        if (permitResult?.permit) permitParams = permitResult.permit;
+                        if (permitResult?.permit) {
+                            permitParams = permitResult.permit;
+                        }
                     }
                 } else {
-                    await handleApprove(false);
+                    const boundedApprovalAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
+                    await handleApprove(false, boundedApprovalAmount, true, aTokenAddr);
                     setIsActionLoading(true);
                     await new Promise(r => setTimeout(r, 1500));
                     fetchPositionData();
+
+                    // Defensive recheck for BSC: if allowance is still too tight, force explicit max approval once more.
+                    const refreshedAllowance = await publicClient?.readContract({
+                        address: getAddress(aTokenAddr),
+                        abi: parseAbi(ABIS.ERC20),
+                        functionName: 'allowance',
+                        args: [getAddress(account), getAddress(adapterAddress)],
+                    }) as bigint || 0n;
+
+                    if (chainId === 56 && refreshedAllowance < (srcAmountBigInt + 1_000_000_000_000n)) {
+                        addLog?.('Allowance still tight after approval, retrying bounded approval...', 'warning');
+                        const boundedRetryAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
+                        await handleApprove(false, boundedRetryAmount, true, aTokenAddr);
+                        setIsActionLoading(true);
+                        await new Promise(r => setTimeout(r, 1000));
+                        fetchPositionData();
+                    }
                 }
             }
 
             addLog?.('Building secure transaction calldata...', 'warning');
-            const txResult = await buildCollateralSwapTx({
+            const baseBuildParams = {
                 fromToken: { ...quoteFrom, address: getAddress(quoteFrom.address || quoteFrom.underlyingAsset) },
                 toToken: { ...quoteTo, address: getAddress(quoteTo.address || quoteTo.underlyingAsset) },
                 priceRoute,
                 adapterAddress,
                 srcAmount: srcAmount.toString(),
-                isMaxSwap: !!supplyBalance && swapAmount >= supplyBalance,
+                isMaxSwap: supplyBalance !== null && swapAmount >= supplyBalance,
                 slippageBps: slippage,
                 marketKey: marketKey || targetNetwork.key,
                 chainId,
                 walletAddress: account,
-            });
+            };
+
+            let txResult;
+            try {
+                txResult = await buildCollateralSwapTx(baseBuildParams);
+            } catch (buildError: any) {
+                if (String(buildError?.message || '').includes('MAX_SWAP_OFFSET_NOT_FOUND') && baseBuildParams.isMaxSwap) {
+                    addLog?.('Retrying build without max offset path...', 'info');
+                    txResult = await buildCollateralSwapTx({
+                        ...baseBuildParams,
+                        isMaxSwap: false,
+                    });
+                } else {
+                    throw buildError;
+                }
+            }
 
             localTxId = txResult.transactionId;
             updateCurrentTransactionId(localTxId);
@@ -383,6 +513,15 @@ export const useCollateralSwapActions = ({
                 0
             ] as const;
 
+            // Preflight simulation on public RPC helps distinguish contract revert from wallet/provider simulation issues.
+            const simulation = await publicClient?.simulateContract({
+                account: getAddress(account),
+                address: getAddress(networkAddresses.POOL),
+                abi: parseAbi(ABIS.POOL),
+                functionName: 'flashLoanSimple',
+                args: flashLoanArgs,
+            });
+
             addLog?.('Confirm in your wallet...', 'warning');
 
             const hash = await walletClient.writeContract({
@@ -391,6 +530,7 @@ export const useCollateralSwapActions = ({
                 abi: parseAbi(ABIS.POOL),
                 functionName: 'flashLoanSimple',
                 args: flashLoanArgs,
+                ...(simulation?.request?.gas ? { gas: simulation.request.gas } : {}),
             });
 
             addLog?.(`Transaction broadcasted: ${hash}`, 'success');
@@ -419,15 +559,37 @@ export const useCollateralSwapActions = ({
                 addLog?.('User rejected swap.', 'warning');
                 if (localTxId) rejectTransaction(localTxId, 'wallet_rejected').catch(() => { });
             } else {
-                setTxError(error.message);
-                addLog?.('Swap Failed: ' + error.message, 'error');
+                const diagnostic = [
+                    error?.shortMessage,
+                    error?.message,
+                    error?.details,
+                    error?.data,
+                    error?.cause?.shortMessage,
+                    error?.cause?.message,
+                    error?.cause?.details,
+                    error?.cause?.data,
+                ].filter(Boolean).join(' | ');
+
+                logger.error('[useCollateralSwapActions] Swap failure diagnostic', {
+                    chainId,
+                    marketKey: marketKey || targetNetwork?.key,
+                    account,
+                    fromToken: fromToken?.symbol,
+                    toToken: toToken?.symbol,
+                    swapAmount: swapAmount?.toString?.() || '0',
+                    diagnostic,
+                    rawError: error,
+                });
+
+                setTxError(error.message || 'Swap failed');
+                addLog?.('Swap Failed: ' + (error.message || 'Unknown error'), 'error');
             }
             resetRefreshCountdown();
         } finally {
             setIsActionLoading(false);
             updateCurrentTransactionId(null);
         }
-    }, [account, walletClient, publicClient, allowance, swapAmount, supplyBalance, swapQuote, fetchQuote, addLog, slippage, adapterAddress, networkAddresses, chainId, ensureWalletNetwork, targetNetwork?.key || '', preferPermit, forceRequirePermit, handleApprove, onTxSent, clearQuote, fetchPositionData, resetRefreshCountdown, signedPermit, marketKey, clearQuoteError, simulateError]);
+    }, [account, walletClient, publicClient, allowance, swapAmount, supplyBalance, swapQuote, fetchQuote, addLog, slippage, providedAdapterAddress, providedATokenAddress, networkAddresses, chainId, ensureWalletNetwork, targetNetwork?.key || '', preferPermit, forceRequirePermit, handleApprove, onTxSent, clearQuote, fetchPositionData, resetRefreshCountdown, signedPermit, marketKey, clearQuoteError, simulateError]);
 
     return {
         isActionLoading, isSigning, signedPermit, forceRequirePermit, txError, userRejected,

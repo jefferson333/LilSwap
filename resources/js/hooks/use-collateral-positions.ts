@@ -23,7 +23,6 @@ export const useCollateralPositions = ({
     const { publicClient } = useWeb3();
     const [supplyBalance, setSupplyBalance] = useState<bigint | null>(null);
     const [formattedSupply, setFormattedSupply] = useState('0');
-    const [allowance, setAllowance] = useState(BigInt(0));
     const [isPositionLoading, setIsPositionLoading] = useState(false);
 
     const isValidATokenAddress = (addr: string) => {
@@ -63,18 +62,6 @@ export const useCollateralPositions = ({
     const targetNetwork = selectedNetwork || DEFAULT_NETWORK;
     const networkAddresses = targetNetwork.addresses || ADDRESSES;
 
-    const adapterAddress = useMemo(() => {
-        if (!networkAddresses?.SWAP_COLLATERAL_ADAPTER) {
-            return null;
-        }
-
-        try {
-            return getAddress(networkAddresses.SWAP_COLLATERAL_ADAPTER);
-        } catch {
-            return null;
-        }
-    }, [networkAddresses?.SWAP_COLLATERAL_ADAPTER]);
-
     // Use PublicClient for read operations
     const readClient = publicClient;
 
@@ -104,43 +91,7 @@ export const useCollateralPositions = ({
                 setFormattedSupply(formatted);
                 addLog?.(`[Collateral] ${fromToken.symbol} balance: ${formatted} (from server)`, 'success');
 
-                if (!adapterAddress) {
-                    setAllowance(BigInt(0));
-                    setIsPositionLoading(false);
-
-                    return;
-                }
-
-                try {
-                    let aTokenAddr = fromToken.aTokenAddress;
-
-                    if (!isValidATokenAddress(aTokenAddr)) {
-                        aTokenAddr = await readClient.readContract({
-                            address: getAddress(networkAddresses.DATA_PROVIDER),
-                            abi: parseAbi(ABIS.DATA_PROVIDER),
-                            functionName: 'getReserveTokensAddresses',
-                            args: [getAddress(fromToken.underlyingAsset || fromToken.address)],
-                        }).then((res: any) => res[0]); // first element is aTokenAddress
-                    }
-
-                    const currentAllowance = await readClient.readContract({
-                        address: getAddress(aTokenAddr),
-                        abi: parseAbi(ABIS.ERC20),
-                        functionName: 'allowance',
-                        args: [getAddress(account), getAddress(adapterAddress)],
-                    });
-
-                    if (signal.aborted || !isMountedRef.current) {
-                        return;
-                    }
-
-                    setAllowance(currentAllowance as bigint);
-                } catch (error: any) {
-                    logger.warn('[useCollateralPositions] Allowance check failed:', error.message);
-                }
-
                 setIsPositionLoading(false);
-
                 return;
             }
 
@@ -193,30 +144,6 @@ export const useCollateralPositions = ({
 
             addLog?.(`[Collateral] ${fromToken.symbol} balance: ${formatted}`, 'success');
 
-            if (!adapterAddress) {
-                setAllowance(BigInt(0));
-                setIsPositionLoading(false);
-
-                return;
-            }
-
-            const currentAllowance = await retryContractCall(
-                () => readClient.readContract({
-                    address: getAddress(aTokenAddr),
-                    abi: parseAbi(ABIS.ERC20),
-                    functionName: 'allowance',
-                    args: [getAddress(account), getAddress(adapterAddress)],
-                }),
-                `${fromToken.symbol} aToken allowance`,
-                { maxAttempts: 3, initialDelay: 500 }
-            );
-
-            if (signal.aborted || !isMountedRef.current) {
-                return;
-            }
-
-            setAllowance(currentAllowance as bigint);
-
         } catch (error: any) {
             if (error.name !== 'AbortError' && !signal.aborted) {
                 logger.error('[fetchPositionData]', error);
@@ -226,7 +153,7 @@ export const useCollateralPositions = ({
                 setIsPositionLoading(false);
             }
         }
-    }, [account, readClient, fromToken, addLog, networkAddresses, adapterAddress, selectedNetwork]);
+    }, [account, readClient, fromToken, addLog, networkAddresses, selectedNetwork]);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -241,7 +168,6 @@ export const useCollateralPositions = ({
     }, []);
 
     useEffect(() => {
-        setAllowance(BigInt(0));
         setSupplyBalance(null);
         setFormattedSupply('0');
     }, [fromToken?.symbol, fromToken?.address]);
@@ -257,7 +183,6 @@ export const useCollateralPositions = ({
     return {
         supplyBalance,
         formattedSupply,
-        allowance,
         fetchPositionData,
         isPositionLoading,
     };

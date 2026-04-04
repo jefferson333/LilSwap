@@ -24,6 +24,7 @@ import {
     useSwitchChain,
     useDisconnect,
     usePublicClient,
+    useWalletClient,
     http
 } from 'wagmi';
 import { useAppearance } from '@/hooks/use-appearance';
@@ -221,6 +222,7 @@ const Web3InternalProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }, [switchChainAsync]);
 
     const publicClient = usePublicClient();
+    const { data: walletClient } = useWalletClient();
 
     return (
         <Web3Context.Provider
@@ -238,7 +240,7 @@ const Web3InternalProvider: React.FC<{ children: ReactNode }> = ({ children }) =
                 setSelectedNetwork: changeNetwork,
                 availableNetworks: allowedNetworks,
                 publicClient,
-                walletClient: null,
+                walletClient,
             }}
         >
             {children}
