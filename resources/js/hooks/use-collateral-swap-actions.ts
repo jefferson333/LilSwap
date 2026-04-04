@@ -42,6 +42,10 @@ interface UseCollateralSwapActionsProps {
     onTxSent?: (hash: string) => void;
     adapterAddress?: string | null;
     aTokenAddress?: string | null;
+    preFetchedNonce?: bigint | null;
+    preFetchedTokenName?: string | null;
+    onSignatureCached?: (sig: any) => void;
+    cachedPermit?: any | null;
 }
 
 export const useCollateralSwapActions = ({
@@ -66,6 +70,10 @@ export const useCollateralSwapActions = ({
     onTxSent,
     adapterAddress: providedAdapterAddress,
     aTokenAddress: providedATokenAddress,
+    preFetchedNonce,
+    preFetchedTokenName,
+    onSignatureCached,
+    cachedPermit,
 }: UseCollateralSwapActionsProps) => {
     const publicClient = usePublicClient();
     const { data: walletClient } = useWalletClient();
@@ -155,24 +163,46 @@ export const useCollateralSwapActions = ({
             let nonce: bigint;
             let name: string;
 
-            try {
-                nonce = await publicClient?.readContract({
-                    address: getAddress(aTokenAddr),
-                    abi: parseAbi(ABIS.ERC20),
-                    functionName: 'nonces',
-                    args: [getAddress(account)],
-                }) as bigint;
+            if (preFetchedNonce !== null && preFetchedNonce !== undefined && preFetchedTokenName) {
+                nonce = preFetchedNonce;
+                name = preFetchedTokenName;
+            } else {
+                try {
+                    const calls = [
+                        {
+                            address: getAddress(aTokenAddr),
+                            abi: parseAbi(ABIS.ERC20),
+                            functionName: 'nonces',
+                            args: [getAddress(account)],
+                        },
+                        {
+                            address: getAddress(aTokenAddr),
+                            abi: parseAbi(ABIS.ERC20),
+                            functionName: 'name',
+                        }
+                    ];
 
-                name = await publicClient?.readContract({
-                    address: getAddress(aTokenAddr),
-                    abi: parseAbi(ABIS.ERC20),
-                    functionName: 'name',
-                }) as string;
-            } catch (readErr: any) {
-                const noPermitErr: any = new Error('Token does not support EIP-2612 permit; use on-chain approve');
-                noPermitErr.code = 'NO_PERMIT';
-                noPermitErr.cause = readErr;
-                throw noPermitErr;
+                    const results = await publicClient?.multicall({
+                        contracts: calls as any,
+                        allowFailure: true,
+                    });
+
+                    nonce = (results?.[0]?.status === 'success' ? (results[0].result as bigint) : 0n);
+                    name = (results?.[1]?.status === 'success' ? (results[1].result as string) : '');
+
+                    if (!name) {
+                        name = await publicClient?.readContract({
+                            address: getAddress(aTokenAddr),
+                            abi: parseAbi(ABIS.ERC20),
+                            functionName: 'name',
+                        }) as string;
+                    }
+                } catch (readErr: any) {
+                    const noPermitErr: any = new Error('Token does not support EIP-2612 permit; use on-chain approve');
+                    noPermitErr.code = 'NO_PERMIT';
+                    noPermitErr.cause = readErr;
+                    throw noPermitErr;
+                }
             }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
@@ -247,7 +277,8 @@ export const useCollateralSwapActions = ({
                 if (!(await ensureWalletNetwork())) return;
             }
 
-            let aTokenAddress = aTokenAddressOverride || providedATokenAddress || fromToken.aTokenAddress;
+            let aTokenAddress = aTokenAddressOverride || providedATokenAddress || fromToken?.aTokenAddress;
+            
             if (!isValidATokenAddress(aTokenAddress)) {
                 const tokenAddresses = await publicClient?.readContract({
                     address: getAddress(networkAddresses.DATA_PROVIDER),
@@ -353,7 +384,8 @@ export const useCollateralSwapActions = ({
             const srcAmountBigInt = BigInt(srcAmount);
             let permitParams = { amount: 0n, deadline: 0, v: 0, r: zeroHash as Hex, s: zeroHash as Hex };
 
-            let aTokenAddr = providedATokenAddress || quoteFrom.aTokenAddress;
+            let aTokenAddr = providedATokenAddress || quoteFrom?.aTokenAddress;
+            
             if (!isValidATokenAddress(aTokenAddr)) {
                 const tokenAddresses = await publicClient?.readContract({
                     address: getAddress(networkAddresses.DATA_PROVIDER),
@@ -364,17 +396,12 @@ export const useCollateralSwapActions = ({
                 aTokenAddr = tokenAddresses[0] || tokenAddresses.aTokenAddress;
             }
 
-            // Re-read allowance from the resolved aToken to prevent false positives when UI cache was derived from a different token.
-            const effectiveAllowance = await publicClient?.readContract({
-                address: getAddress(aTokenAddr),
-                abi: parseAbi(ABIS.ERC20),
-                functionName: 'allowance',
-                args: [getAddress(account), getAddress(adapterAddress)],
-            }) as bigint || 0n;
+            // Trust the UI allowance provided via props to avoid redundant on-chain call
+            const effectiveAllowance = allowance;
 
             const effectivePreferPermit = forceRequirePermit || preferPermit;
 
-            logger.debug(`[useCollateralSwapActions] Allowance Check | UI Allowance: ${allowance.toString()} | On-chain aToken Allowance: ${effectiveAllowance.toString()} | Required: ${srcAmountBigInt.toString()} | ForcePermit: ${forceRequirePermit} | PreferPermit: ${preferPermit}`);
+            logger.debug(`[useCollateralSwapActions] Allowance Check | Allowance: ${allowance.toString()} | Required: ${srcAmountBigInt.toString()} | ForcePermit: ${forceRequirePermit} | PreferPermit: ${preferPermit}`);
 
             if (effectiveAllowance < srcAmountBigInt || forceRequirePermit) {
                 if (effectivePreferPermit) {

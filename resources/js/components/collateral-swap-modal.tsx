@@ -28,6 +28,10 @@ import { mapErrorToUserFriendly } from '../utils/error-mapping';
 import { getTokenLogo, onTokenImgError } from '../utils/get-token-logo';
 import logger from '../utils/logger';
 import { normalizeDecimalInput } from '../utils/normalize-decimal-input';
+import { getAddress, parseAbi } from 'viem';
+import { usePublicClient } from 'wagmi';
+import { ABIS } from '../constants/abis';
+import { useApprovalState } from '../hooks/use-approval-state';
 import { saveTokenSelection, getSavedTokenSelection } from '../utils/token-selection-memory';
 import { ADDRESSES, getAddressesByKey } from '../constants/addresses';
 import { MARKETS, DEFAULT_MARKET } from '../constants/networks';
@@ -144,6 +148,69 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         marketAssets: localMarketAssets,
         adapterAddress,
     });
+    const [aTokenAddress, setATokenAddress] = useState<string | null>(null);
+    const publicClient = usePublicClient();
+
+    // Resolve aTokenAddress for the fromToken
+    useEffect(() => {
+        let isMounted = true;
+
+        async function fetchATokenAddress() {
+            if (!fromToken || !selectedNetwork || !publicClient) {
+                setATokenAddress(null);
+                return;
+            }
+
+            const directATokenAddress = fromToken.aTokenAddress || null;
+            if (directATokenAddress) {
+                setATokenAddress(directATokenAddress);
+                return;
+            }
+
+            try {
+                const clientChainId = await publicClient.getChainId();
+                if (clientChainId !== selectedNetwork.chainId) {
+                    return;
+                }
+
+                const market = MARKETS[selectedNetwork.key as keyof typeof MARKETS] || DEFAULT_MARKET;
+                const dataProviderAddr = market.addresses.DATA_PROVIDER;
+                if (!dataProviderAddr) return;
+
+                const data = await publicClient.readContract({
+                    address: getAddress(dataProviderAddr),
+                    abi: parseAbi(ABIS.DATA_PROVIDER),
+                    functionName: 'getReserveTokensAddresses',
+                    args: [getAddress(fromToken.underlyingAsset || fromToken.address || '')],
+                }) as any;
+
+                if (isMounted && data && (data.aTokenAddress || data[0])) {
+                    setATokenAddress(data.aTokenAddress || data[0]);
+                }
+            } catch (err: any) {
+                logger.debug('[CollateralSwapModal] aTokenAddress unavailable for selected token/network (non-fatal).');
+            }
+        }
+
+        fetchATokenAddress();
+        return () => { isMounted = false; };
+    }, [fromToken, selectedNetwork, publicClient]);
+
+    // Use Approval Hook for Collateral (aToken)
+    const {
+        onChainAllowance,
+        nonce: preFetchedNonce,
+        tokenName: preFetchedTokenName,
+        saveSignature,
+        cachedSignature
+    } = useApprovalState({
+        account,
+        tokenAddress: aTokenAddress,
+        spenderAddress: adapterAddress,
+        amountRequired: swapAmount,
+        isDebt: false,
+        chainId: selectedNetwork.chainId
+    });
 
     const {
         isActionLoading,
@@ -159,7 +226,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         account,
         fromToken,
         toToken,
-        allowance: BigInt(0),
+        allowance: onChainAllowance,
         swapAmount,
         supplyBalance: localBalance,
         swapQuote,
@@ -173,6 +240,11 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         selectedNetwork,
         preferPermit,
         adapterAddress,
+        aTokenAddress,
+        preFetchedNonce,
+        preFetchedTokenName,
+        onSignatureCached: saveSignature,
+        cachedPermit: cachedSignature,
         marketKey: initialMarketKey || selectedNetwork?.key,
         onTxSent: (hash: string) => {
             const amountDisplay = inputValue ? `${inputValue} ${fromToken.symbol}` : '';

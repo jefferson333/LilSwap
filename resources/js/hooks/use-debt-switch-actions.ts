@@ -161,18 +161,46 @@ export const useDebtSwitchActions = ({
     const generateAndCachePermit = useCallback(async (debtTokenAddr: string) => {
         if (!walletClient || !account) return null;
         try {
-            const nonce = (preFetchedNonce !== null && preFetchedNonce !== undefined) ? preFetchedNonce : await publicClient?.readContract({
-                address: getAddress(debtTokenAddr),
-                abi: parseAbi(ABIS.DEBT_TOKEN),
-                functionName: 'nonces',
-                args: [getAddress(account)],
-            }) as bigint;
+            let nonce: bigint;
+            let name: string;
 
-            const name = preFetchedTokenName || await publicClient?.readContract({
-                address: getAddress(debtTokenAddr),
-                abi: parseAbi(ABIS.DEBT_TOKEN),
-                functionName: 'name',
-            }) as string;
+            if (preFetchedNonce !== null && preFetchedNonce !== undefined && preFetchedTokenName) {
+                // Use pre-fetched data directly
+                nonce = preFetchedNonce;
+                name = preFetchedTokenName;
+            } else {
+                // Fallback to optimized multicall instead of separate readContract calls
+                const calls = [
+                    {
+                        address: getAddress(debtTokenAddr),
+                        abi: parseAbi(ABIS.DEBT_TOKEN),
+                        functionName: 'nonces',
+                        args: [getAddress(account)],
+                    },
+                    {
+                        address: getAddress(debtTokenAddr),
+                        abi: parseAbi(ABIS.DEBT_TOKEN),
+                        functionName: 'name',
+                    }
+                ];
+
+                const results = await publicClient?.multicall({
+                    contracts: calls as any,
+                    allowFailure: true,
+                });
+
+                nonce = (results?.[0]?.status === 'success' ? (results[0].result as bigint) : 0n);
+                name = (results?.[1]?.status === 'success' ? (results[1].result as string) : '');
+
+                if (!name) {
+                    // Critical fallback if everything else failed
+                    name = await publicClient?.readContract({
+                        address: getAddress(debtTokenAddr),
+                        abi: parseAbi(ABIS.DEBT_TOKEN),
+                        functionName: 'name',
+                    }) as string;
+                }
+            }
 
             const deadline = BigInt(Math.floor(Date.now() / 1000) + 3600);
             const value = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
@@ -215,7 +243,7 @@ export const useDebtSwitchActions = ({
             }
             throw err;
         }
-    }, [account, walletClient, publicClient, adapterAddress, chainId, addLog]);
+    }, [account, walletClient, publicClient, adapterAddress, chainId, addLog, preFetchedNonce, preFetchedTokenName, onSignatureCached]);
 
     const handleApproveDelegation = useCallback(async (preferPermitOverride?: boolean, skipNetworkCheck?: boolean, debtTokenAddressOverride?: string) => {
         const preferPermitFinal = typeof preferPermitOverride === 'boolean' ? preferPermitOverride : preferPermit;
@@ -229,8 +257,10 @@ export const useDebtSwitchActions = ({
                 if (!(await ensureWalletNetwork())) return;
             }
 
-            let debtTokenAddress = debtTokenAddressOverride || providedDebtTokenAddress || toToken.variableDebtTokenAddress;
+            let debtTokenAddress = debtTokenAddressOverride || providedDebtTokenAddress || toToken?.variableDebtTokenAddress;
+            
             if (!debtTokenAddress || debtTokenAddress === zeroAddress) {
+                // Only if missing entirely, then we call reserve data
                 const toReserveData = await publicClient?.readContract({
                     address: getAddress(networkAddresses.POOL),
                     abi: parseAbi(ABIS.POOL_GETTER),
@@ -303,8 +333,15 @@ export const useDebtSwitchActions = ({
             const exactDebtRepayAmount = activeQuote.destAmount;
 
             let permitParams = { amount: 0n, deadline: 0, v: 0, r: zeroHash as Hex, s: zeroHash as Hex };
-            let newDebtTokenAddr = providedDebtTokenAddress || qTo.variableDebtTokenAddress;
+            let newDebtTokenAddr = providedDebtTokenAddress || qTo?.variableDebtTokenAddress;
+            
             if (!newDebtTokenAddr || newDebtTokenAddr === zeroAddress) {
+                // Secondary check in quote if state was missing
+                newDebtTokenAddr = qTo?.variableDebtTokenAddress;
+            }
+
+            if (!newDebtTokenAddr || newDebtTokenAddr === zeroAddress) {
+                // Final fallback if truly missing everywhere
                 const toReserveData = await publicClient?.readContract({
                     address: getAddress(networkAddresses.POOL),
                     abi: parseAbi(ABIS.POOL_GETTER),
