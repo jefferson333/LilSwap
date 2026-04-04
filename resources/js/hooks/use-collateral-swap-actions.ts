@@ -80,7 +80,7 @@ export const useCollateralSwapActions = ({
 
     const [isActionLoading, setIsActionLoading] = useState(false);
     const [isSigning, setIsSigning] = useState(false);
-    const [signedPermit, setSignedPermit] = useState<any>(null);
+
     const [forceRequirePermit, setForceRequirePermit] = useState(() => {
         try {
             if (typeof window !== 'undefined' && window.localStorage) {
@@ -122,8 +122,11 @@ export const useCollateralSwapActions = ({
 
     const chainId = targetNetwork.chainId;
 
+    const clearCachedPermit = useCallback(() => {
+        // No longer managing local state here; global cache manages persistence
+    }, []);
+
     useEffect(() => {
-        setSignedPermit(null);
         setTxError(null);
         setUserRejected(false);
         setIsActionLoading(false);
@@ -246,7 +249,7 @@ export const useCollateralSwapActions = ({
             const permitParams = { amount: value, deadline: Number(deadline), v, r, s };
             const sigData = { params: permitParams, token: aTokenAddr, deadline: Number(deadline), value };
 
-            setSignedPermit(sigData);
+            onSignatureCached?.(sigData);
             setForceRequirePermit(false);
 
             addLog?.('Signature received and cached', 'success');
@@ -263,7 +266,7 @@ export const useCollateralSwapActions = ({
             }
             throw err;
         }
-    }, [account, walletClient, publicClient, adapterAddress, chainId, addLog]);
+    }, [account, walletClient, publicClient, adapterAddress, chainId, addLog, onSignatureCached]);
 
     const handleApprove = useCallback(async (preferPermitOverride?: boolean, exactAmount?: bigint, skipNetworkCheck?: boolean, aTokenAddressOverride?: string) => {
         const preferPermitFinal = typeof preferPermitOverride === 'boolean' ? preferPermitOverride : preferPermit;
@@ -402,25 +405,56 @@ export const useCollateralSwapActions = ({
 
             const effectivePreferPermit = forceRequirePermit || preferPermit;
 
-            logger.debug(`[useCollateralSwapActions] Allowance Check | Allowance: ${allowance.toString()} | Required: ${srcAmountBigInt.toString()} | ForcePermit: ${forceRequirePermit} | PreferPermit: ${preferPermit}`);
+            logger.debug(`[useCollateralSwapActions] Evaluation | Allowance: ${allowance.toString()} | Required: ${srcAmountBigInt.toString()} | ForcePermit: ${forceRequirePermit} | PreferPermit: ${preferPermit} | HasLocalSignature: ${!!cachedPermit}`);
 
             if (effectiveAllowance < srcAmountBigInt || forceRequirePermit) {
                 if (effectivePreferPermit) {
-                    const effectiveSignedPermit = signedPermit;
+                    const effectiveSignedPermit = cachedPermit;
 
-                    if (effectiveSignedPermit && !forceRequirePermit &&
-                        getAddress(effectiveSignedPermit.token) === getAddress(aTokenAddr) &&
-                        effectiveSignedPermit.deadline > Math.floor(Date.now() / 1000) &&
-                        effectiveSignedPermit.value >= srcAmountBigInt) {
-                        permitParams = effectiveSignedPermit.params;
+                    if (effectiveSignedPermit) {
+                        const tokenMatch = getAddress(effectiveSignedPermit.token) === getAddress(aTokenAddr);
+                        const deadlineValid = effectiveSignedPermit.deadline > Math.floor(Date.now() / 1000);
+                        const valueValid = effectiveSignedPermit.value >= srcAmountBigInt;
+
+                        logger.debug(`[useCollateralSwapActions] Permit Check | Match: ${tokenMatch} | Deadline: ${deadlineValid} | Value: ${valueValid} | P-Val: ${effectiveSignedPermit.value} | Req: ${srcAmountBigInt}`);
+
+                        if (tokenMatch && deadlineValid && valueValid && !forceRequirePermit) {
+                            logger.debug('[useCollateralSwapActions] REUSING successful cached permit');
+                            permitParams = effectiveSignedPermit.params;
+                        } else {
+                            logger.debug('[useCollateralSwapActions] Cached permit INVALID or EXPIRED, re-requesting...');
+                            const permitAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
+                            let permitResult: any = null;
+                            try {
+                                permitResult = await handleApprove(effectivePreferPermit, permitAmount, true, aTokenAddr);
+                            } catch (permitErr: any) {
+                                if (permitErr?.code === 'NO_PERMIT') {
+                                    addLog?.('Permit not supported, using on-chain approve...', 'info');
+                                    const boundedFallbackAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
+                                    await handleApprove(false, boundedFallbackAmount, true, aTokenAddr);
+                                    setIsActionLoading(true);
+                                    await new Promise(r => setTimeout(r, 1000));
+                                    fetchPositionData();
+                                    permitResult = null;
+                                } else {
+                                    throw permitErr;
+                                }
+                            }
+
+                            setIsActionLoading(true);
+                            if (permitResult?.permit) {
+                                permitParams = permitResult.permit;
+                            }
+                        }
                     } else {
+                        logger.debug('[useCollateralSwapActions] No local permit found, re-requesting...');
                         const permitAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
                         let permitResult: any = null;
                         try {
                             permitResult = await handleApprove(effectivePreferPermit, permitAmount, true, aTokenAddr);
                         } catch (permitErr: any) {
                             if (permitErr?.code === 'NO_PERMIT') {
-                                addLog?.('Permit not supported for this token, using on-chain approve...', 'info');
+                                addLog?.('Permit not supported... fallback to on-chain approve', 'info');
                                 const boundedFallbackAmount = srcAmountBigInt + (srcAmountBigInt * 100n / 10000n) + 1n;
                                 await handleApprove(false, boundedFallbackAmount, true, aTokenAddr);
                                 setIsActionLoading(true);
@@ -605,11 +639,11 @@ export const useCollateralSwapActions = ({
             setIsActionLoading(false);
             updateCurrentTransactionId(null);
         }
-    }, [account, walletClient, publicClient, allowance, swapAmount, supplyBalance, swapQuote, fetchQuote, addLog, slippage, providedAdapterAddress, providedATokenAddress, networkAddresses, chainId, ensureWalletNetwork, targetNetwork?.key || '', preferPermit, forceRequirePermit, handleApprove, onTxSent, clearQuote, fetchPositionData, resetRefreshCountdown, signedPermit, marketKey, clearQuoteError, simulateError]);
+    }, [account, walletClient, publicClient, allowance, swapAmount, supplyBalance, swapQuote, fetchQuote, addLog, slippage, providedAdapterAddress, providedATokenAddress, networkAddresses, chainId, ensureWalletNetwork, targetNetwork?.key || '', preferPermit, forceRequirePermit, handleApprove, onTxSent, clearQuote, fetchPositionData, resetRefreshCountdown, cachedPermit, marketKey, clearQuoteError, simulateError]);
 
     return {
-        isActionLoading, isSigning, signedPermit, forceRequirePermit, txError, userRejected,
+        isActionLoading, isSigning, signedPermit: cachedPermit, forceRequirePermit, txError, userRejected,
         handleApprove, handleSwap, clearTxError: () => setTxError(null),
-        clearUserRejected: () => setUserRejected(false), clearCachedPermit: () => { }, setTxError,
+        clearUserRejected: () => setUserRejected(false), clearCachedPermit, setTxError,
     };
 };

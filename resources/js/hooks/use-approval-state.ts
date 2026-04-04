@@ -38,22 +38,23 @@ export const useApprovalState = ({
 
     const cacheKey = useMemo(() => {
         if (!tokenAddress || !spenderAddress || !account) return null;
-        return `${chainId}-${tokenAddress.toLowerCase()}-${spenderAddress.toLowerCase()}-${account.toLowerCase()}`;
-    }, [chainId, tokenAddress, spenderAddress, account]);
+        return `${chainId}-${tokenAddress.toLowerCase()}-${spenderAddress.toLowerCase()}-${account.toLowerCase()}-${isDebt ? 'debt' : 'erc20'}`;
+    }, [chainId, tokenAddress, spenderAddress, account, isDebt]);
 
     const cachedSignature = useMemo(() => {
         if (!cacheKey) return null;
-        return signatureCache.get(cacheKey) || null;
+        const sig = signatureCache.get(cacheKey) || null;
+        if (sig) {
+            logger.debug(`[useApprovalState] Signature CACHE HIT for ${tokenAddress} | Key: ${cacheKey}`);
+        }
+        return sig;
     }, [cacheKey]);
-
-    const lastFetchedKey = useEffect(() => {
-        // This is a dummy to track mount state or similar if needed
-    }, []);
 
     const fetchAllowance = useCallback(async () => {
         if (!account || !tokenAddress || !spenderAddress || !publicClient) return;
 
-        const key = `${chainId}-${tokenAddress.toLowerCase()}-${spenderAddress.toLowerCase()}-${account.toLowerCase()}-${isDebt ? 'debt' : 'erc20'}`;
+        const key = cacheKey;
+        if (!key) return;
 
         // Check if there's already an active request for this key
         if (activeAllowanceRequests.has(key)) {
@@ -109,11 +110,11 @@ export const useApprovalState = ({
                 return { allowance: allowanceVal, nonce: nonceVal, name: nameVal };
             })();
 
-            activeAllowanceRequests.set(key, fetchPromise);
+            activeAllowanceRequests.set(key!, fetchPromise);
             const { allowance, nonce, name } = await fetchPromise;
 
             // Only update state if the key hasn't changed while we were fetching
-            const currentKey = `${chainId}-${tokenAddress.toLowerCase()}-${spenderAddress.toLowerCase()}-${account.toLowerCase()}-${isDebt ? 'debt' : 'erc20'}`;
+            const currentKey = cacheKey;
             if (currentKey !== key) return;
 
             logger.debug(`[useApprovalState] Fetched ${isDebt ? 'Borrow' : 'ERC20'} Data | Allowance: ${allowance.toString()} | Nonce: ${nonce.toString()} | Name: ${name} | Token: ${tokenAddress}`);
@@ -124,22 +125,22 @@ export const useApprovalState = ({
         } catch (error) {
             logger.warn('[useApprovalState] Error fetching permission data:', error);
         } finally {
-            activeAllowanceRequests.delete(key);
+            activeAllowanceRequests.delete(key!);
             setIsFetching(false);
         }
-    }, [account, tokenAddress, spenderAddress, publicClient, isDebt, chainId]);
+    }, [account, tokenAddress, spenderAddress, publicClient, isDebt, chainId, cacheKey]);
 
     useEffect(() => {
-        let isMounted = true;
         fetchAllowance();
-        return () => { isMounted = false; };
     }, [fetchAllowance, chainId]);
 
-    const isApproved = useMemo(() => {
-        // 1. Check on-chain - only once we have a definitive answer and it's non-zero
-        if (!isFetching && onChainAllowance > 0n && onChainAllowance >= amountRequired) return true;
+    const [cacheVersion, setCacheVersion] = useState(0);
 
-        // 2. Check cached signature
+    const isApproved = useMemo(() => {
+        // Use cacheVersion to force re-memoization when a signature is saved
+        const dummy = cacheVersion;
+        
+        // 1. Signature Check First (as it's often more current than on-chain fetch during bursts)
         if (
             cachedSignature &&
             cachedSignature.deadline > Math.floor(Date.now() / 1000) &&
@@ -148,14 +149,18 @@ export const useApprovalState = ({
             return true;
         }
 
+        // 2. Check on-chain - only once we have a definitive answer and it's non-zero
+        if (!isFetching && onChainAllowance > 0n && onChainAllowance >= amountRequired) return true;
+
         return false;
-    }, [onChainAllowance, amountRequired, cachedSignature, isFetching]);
+    }, [onChainAllowance, amountRequired, cachedSignature, isFetching, cacheVersion]);
 
     const saveSignature = useCallback((signatureData: any) => {
         if (!cacheKey) return;
+        logger.debug(`[useApprovalState] SAVING signature to cache for ${tokenAddress} | Key: ${cacheKey}`);
         signatureCache.set(cacheKey, signatureData);
-        // Force re-render by updating dummy state or just let components re-read
-    }, [cacheKey]);
+        setCacheVersion(v => v + 1); // Trigger re-render across any hook instance
+    }, [cacheKey, tokenAddress]);
 
     return {
         onChainAllowance,

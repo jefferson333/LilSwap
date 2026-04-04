@@ -78,7 +78,7 @@ export const useDebtSwitchActions = ({
 
     const [isActionLoading, setIsActionLoading] = useState(false);
     const [isSigning, setIsSigning] = useState(false);
-    const [signedPermit, setSignedPermit] = useState<any>(null);
+
     const [forceRequirePermit, setForceRequirePermit] = useState(() => {
         try {
             if (typeof window !== 'undefined' && window.localStorage) {
@@ -132,8 +132,11 @@ export const useDebtSwitchActions = ({
 
     const chainId = targetNetwork.chainId;
 
+    const clearCachedPermit = useCallback(() => {
+        // Managed by global cache
+    }, []);
+
     useEffect(() => {
-        setSignedPermit(null);
         setTxError(null);
         setUserRejected(false);
         setIsActionLoading(false);
@@ -232,7 +235,6 @@ export const useDebtSwitchActions = ({
             const permitParams = { amount: value, deadline: Number(deadline), v, r, s };
             const sigData = { params: permitParams, token: debtTokenAddr, deadline: Number(deadline), value };
             
-            setSignedPermit(sigData);
             onSignatureCached?.(sigData);
             setForceRequirePermit(false);
 
@@ -346,18 +348,34 @@ export const useDebtSwitchActions = ({
                 newDebtTokenAddr = toReserveData.variableDebtTokenAddress || toReserveData[11];
             }
 
-            logger.debug(`[useDebtSwitchActions] Allowance Check | Allowance: ${allowance.toString()} | Required: ${maxNewDebt.toString()} | PreferPermit: ${preferPermit}`);
+            logger.debug(`[useDebtSwitchActions] Evaluation | Allowance: ${allowance.toString()} | Required: ${maxNewDebt.toString()} | ForcePermit: ${forceRequirePermit} | PreferPermit: ${preferPermit} | HasLocalSignature: ${!!cachedPermit}`);
 
             if (allowance < maxNewDebt || forceRequirePermit) {
                 if (forceRequirePermit || preferPermit) {
-                    const effectiveSignedPermit = signedPermit || cachedPermit;
+                    const effectiveSignedPermit = cachedPermit;
 
-                    if (effectiveSignedPermit && !forceRequirePermit && 
-                        getAddress(effectiveSignedPermit.token) === getAddress(newDebtTokenAddr) && 
-                        effectiveSignedPermit.deadline > Math.floor(Date.now() / 1000) && 
-                        effectiveSignedPermit.value >= maxNewDebt) {
-                        permitParams = effectiveSignedPermit.params;
+                    if (effectiveSignedPermit) {
+                        const tokenMatch = getAddress(effectiveSignedPermit.token) === getAddress(newDebtTokenAddr);
+                        const deadlineValid = effectiveSignedPermit.deadline > Math.floor(Date.now() / 1000);
+                        const valueValid = effectiveSignedPermit.value >= maxNewDebt;
+
+                        logger.debug(`[useDebtSwitchActions] Permit Check | Match: ${tokenMatch} | Deadline: ${deadlineValid} | Value: ${valueValid} | P-Val: ${effectiveSignedPermit.value} | Req: ${maxNewDebt}`);
+
+                        if (tokenMatch && deadlineValid && valueValid && !forceRequirePermit) {
+                            logger.debug('[useDebtSwitchActions] REUSING successful cached permit');
+                            permitParams = effectiveSignedPermit.params;
+                        } else {
+                            logger.debug('[useDebtSwitchActions] Cached permit INVALID or EXPIRED, re-requesting...');
+                            const res = await handleApproveDelegation(forceRequirePermit || preferPermit, maxNewDebt, true, newDebtTokenAddr);
+                            setIsActionLoading(true);
+                            if (res?.permit) {
+                                permitParams = res.permit;
+                            } else {
+                                throw new Error('Signature failed');
+                            }
+                        }
                     } else {
+                        logger.debug('[useDebtSwitchActions] No local permit found, re-requesting...');
                         const res = await handleApproveDelegation(forceRequirePermit || preferPermit, maxNewDebt, true, newDebtTokenAddr);
                         setIsActionLoading(true);
                         if (res?.permit) {
@@ -367,6 +385,7 @@ export const useDebtSwitchActions = ({
                         }
                     }
                 } else {
+                    logger.debug('[useDebtSwitchActions] PreferPermit is false, using on-chain approve...');
                     await handleApproveDelegation(false, undefined, true, newDebtTokenAddr);
                     setIsActionLoading(true);
                     await new Promise(r => setTimeout(r, 1500));
@@ -458,11 +477,11 @@ export const useDebtSwitchActions = ({
             setIsActionLoading(false);
             updateCurrentTransactionId(null);
         }
-    }, [account, walletClient, publicClient, allowance, swapAmount, debtBalance, swapQuote, fetchQuote, addLog, slippage, providedAdapterAddress, providedDebtTokenAddress, preFetchedNonce, preFetchedTokenName, networkAddresses, chainId, ensureWalletNetwork, preferPermit, forceRequirePermit, handleApproveDelegation, onTxSent, currentTransactionId, clearQuoteError, clearQuote, fetchDebtData, marketKey || '', targetNetwork?.key || '']);
+    }, [account, walletClient, publicClient, allowance, swapAmount, debtBalance, swapQuote, fetchQuote, addLog, slippage, providedAdapterAddress, providedDebtTokenAddress, preFetchedNonce, preFetchedTokenName, networkAddresses, chainId, ensureWalletNetwork, preferPermit, forceRequirePermit, handleApproveDelegation, onTxSent, currentTransactionId, clearQuoteError, clearQuote, fetchDebtData, marketKey || '', targetNetwork?.key || '', cachedPermit]);
 
     return {
-        isActionLoading, isSigning, signedPermit, forceRequirePermit, txError, lastAttemptedQuote, userRejected,
+        isActionLoading, isSigning, signedPermit: cachedPermit, forceRequirePermit, txError, lastAttemptedQuote, userRejected,
         handleApproveDelegation, handleSwap, clearTxError: () => setTxError(null),
-        clearUserRejected: () => setUserRejected(false), clearCachedPermit: () => {}, setTxError
+        clearUserRejected: () => setUserRejected(false), clearCachedPermit, setTxError
     };
 };
