@@ -56,6 +56,7 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
 }) => {
     const [popoverOpen, setPopoverOpen] = useState(false);
     const popoverRef = useRef<HTMLDivElement>(null);
+    const inputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -96,6 +97,13 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
         }
     };
 
+    const focusPrimaryInput = () => {
+        requestAnimationFrame(() => {
+            inputRef.current?.focus();
+            inputRef.current?.select();
+        });
+    };
+
     return (
         <div className="bg-slate-100 dark:bg-slate-800 border border-border-light dark:border-slate-700 rounded-xl p-1 px-2.5 group transition-colors focus-within:border-purple-500/50">
             {/* Top row: input and token badge */}
@@ -105,6 +113,7 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
                         <span className={`text-2xl font-mono font-bold mr-0.5 select-none transition-colors ${isError ? 'text-rose-500' : (value && value !== '0' ? 'text-slate-900 dark:text-white' : 'text-muted-foreground')}`}>$</span>
                     )}
                     <input
+                        ref={inputRef}
                         type="text"
                         value={value}
                         onChange={(e) => {
@@ -163,7 +172,11 @@ export const CompactAmountInput: React.FC<CompactAmountInputProps> = ({
                 {/* Secondary value (USD or Token) - Toggle at the START */}
                 <button
                     type="button"
-                    onClick={onToggleUSDMode}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                        onToggleUSDMode?.();
+                        focusPrimaryInput();
+                    }}
                     disabled={disabled || !onToggleUSDMode}
                     className="flex items-center gap-1 min-h-5 text-left group/label p-0 bg-transparent border-none appearance-none cursor-pointer disabled:cursor-not-allowed"
                     title={isUSDMode ? "Switch to Token" : "Switch to USD"}

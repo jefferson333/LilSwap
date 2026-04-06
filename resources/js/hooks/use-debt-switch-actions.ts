@@ -330,7 +330,7 @@ export const useDebtSwitchActions = ({
 
             const { priceRoute, srcAmount, fromToken: qFrom, toToken: qTo } = activeQuote;
             const srcAmountBigInt = BigInt(srcAmount);
-            const bufferBps = 100; // ALWAYS 1% buffer for safety during execution
+            const bufferBps = activeQuote?.bufferBps ?? 70;
             const maxNewDebt = calcApprovalAmount(srcAmountBigInt, bufferBps);
             const exactDebtRepayAmount = activeQuote.destAmount;
 
