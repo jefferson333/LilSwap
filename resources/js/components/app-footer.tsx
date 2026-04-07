@@ -58,8 +58,12 @@ const AppFooter: React.FC = () => {
 
                     <div className="flex items-center justify-end gap-3 font-mono text-[13px]">
                         <span>App v{APP_VERSION}</span>
-                        <span className="text-slate-300 dark:text-slate-700">|</span>
-                        <span>API v{apiVersion || '1.14.5'}</span>
+                        {apiVersion && (
+                            <>
+                                <span className="text-slate-300 dark:text-slate-700">|</span>
+                                <span>API v{apiVersion}</span>
+                            </>
+                        )}
                     </div>
                 </div>
 

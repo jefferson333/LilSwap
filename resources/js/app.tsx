@@ -23,11 +23,15 @@ createInertiaApp({
         ),
     setup({ el, App, props }) {
         const root = createRoot(el);
+        const initialApiMeta = (props as any)?.initialPage?.props?.apiMeta ?? {};
 
         root.render(
             <StrictMode>
                 <Web3Provider>
-                    <ApiMetaProvider>
+                    <ApiMetaProvider
+                        initialApiVersion={initialApiMeta.version ?? null}
+                        initialApiStatus={initialApiMeta.isUp ?? true}
+                    >
                         <UserActivityProvider>
                             <ToastProvider>
                                 <TransactionTrackerProvider>

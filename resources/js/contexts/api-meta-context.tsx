@@ -23,9 +23,13 @@ export const notifyApiStatus = (isUp: boolean) => {
     window.dispatchEvent(new CustomEvent(API_STATUS_EVENT, { detail: isUp }));
 };
 
-export const ApiMetaProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-    const [apiVersion, setApiVersion] = useState<string | null>(null);
-    const [isApiUp, setIsApiUp] = useState(true);
+export const ApiMetaProvider: React.FC<{
+    children: ReactNode;
+    initialApiVersion?: string | null;
+    initialApiStatus?: boolean;
+}> = ({ children, initialApiVersion = null, initialApiStatus = true }) => {
+    const [apiVersion, setApiVersion] = useState<string | null>(initialApiVersion);
+    const [isApiUp, setIsApiUp] = useState(initialApiStatus);
 
     useEffect(() => {
         const onVersion = (event: Event) => {
