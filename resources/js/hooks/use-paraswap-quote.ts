@@ -61,7 +61,7 @@ const resolveDiscountPercent = (routeResult: any): number => {
     return 0;
 };
 
-const resolvePriceImplicitUsd = (priceRoute: any): number | null => {
+const resolveVolumeUsd = (priceRoute: any): number | null => {
     if (!priceRoute) return null;
     const srcUSD = parseFloat(priceRoute.srcUSD || '0');
     const destUSD = parseFloat(priceRoute.destUSD || '0');
@@ -259,7 +259,7 @@ export const useParaswapQuote = ({
                     bufferBps,
                     feeBps,
                     discountPercent,
-                    priceImplicitUsd: resolvePriceImplicitUsd(priceRoute),
+                    volumeUsd: resolveVolumeUsd(priceRoute),
                     apyPercent: null,
                 };
 
@@ -329,7 +329,7 @@ export const useParaswapQuote = ({
                     bufferBps,
                     feeBps,
                     discountPercent,
-                    priceImplicitUsd: resolvePriceImplicitUsd(priceRoute),
+                    volumeUsd: resolveVolumeUsd(priceRoute),
                     apyPercent: typeof apyPercent === 'number' ? apyPercent : null,
                 };
 

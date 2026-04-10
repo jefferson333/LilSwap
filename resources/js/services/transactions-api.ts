@@ -148,7 +148,7 @@ interface ConfirmData {
     actualPaid: string;
     srcActualAmount?: string | null;
     collectorAmount?: string | null;
-    priceImplicitUsd?: string | null;
+    volumeUsd?: string | null;
     apyPercent?: number | null;
     gasPrice?: string | null;
     txFee?: string | null;
@@ -167,7 +167,7 @@ export async function confirmTransactionOnChain(transactionId: string | number, 
             actualPaid: confirmData.actualPaid,
             srcActualAmount: confirmData.srcActualAmount || null,
             collectorAmount: confirmData.collectorAmount || null,
-            priceImplicitUsd: confirmData.priceImplicitUsd || null,
+            volumeUsd: confirmData.volumeUsd || null,
             apyPercent: confirmData.apyPercent || null,
             gasPrice: confirmData.gasPrice || null,
             txFee: confirmData.txFee || null
