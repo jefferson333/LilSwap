@@ -18,6 +18,7 @@ interface UseApprovalStateProps {
     amountRequired: bigint;
     isDebt?: boolean;
     chainId: number;
+    enabled?: boolean;
 }
 
 export const useApprovalState = ({
@@ -26,7 +27,8 @@ export const useApprovalState = ({
     spenderAddress,
     amountRequired,
     isDebt = false,
-    chainId
+    chainId,
+    enabled = true,
 }: UseApprovalStateProps) => {
     const publicClient = usePublicClient();
     const { data: walletClient } = useWalletClient();
@@ -51,6 +53,7 @@ export const useApprovalState = ({
     }, [cacheKey]);
 
     const fetchAllowance = useCallback(async () => {
+        if (!enabled) return;
         if (!account || !tokenAddress || !spenderAddress || !publicClient) return;
 
         const key = cacheKey;
@@ -128,11 +131,15 @@ export const useApprovalState = ({
             activeAllowanceRequests.delete(key!);
             setIsFetching(false);
         }
-    }, [account, tokenAddress, spenderAddress, publicClient, isDebt, chainId, cacheKey]);
+    }, [account, tokenAddress, spenderAddress, publicClient, isDebt, chainId, cacheKey, enabled]);
 
     useEffect(() => {
+        if (!enabled) {
+            return;
+        }
+
         fetchAllowance();
-    }, [fetchAllowance, chainId]);
+    }, [enabled, fetchAllowance, chainId]);
 
     const [cacheVersion, setCacheVersion] = useState(0);
 

@@ -29,8 +29,8 @@ let proxySessionBootstrapInFlight: Promise<any> | null = null;
 
 const isProtectedProxyEndpoint = (url?: string | null) => {
     if (!url) {
-return false;
-}
+        return false;
+    }
 
     const normalized = String(url).toLowerCase();
 
@@ -229,8 +229,8 @@ export const getDebtQuote = async (params: any, signal?: AbortSignal) => {
         return response.data;
     } catch (error: any) {
         if (axios.isCancel(error)) {
-throw error;
-}
+            throw error;
+        }
 
         const errorMessage = getPublicApiErrorMessage(error, 'Error fetching quote');
 
@@ -281,8 +281,8 @@ export const getCollateralQuote = async (params: any, signal?: AbortSignal) => {
         return response.data;
     } catch (error: any) {
         if (axios.isCancel(error)) {
-throw error;
-}
+            throw error;
+        }
 
         const errorMessage = getPublicApiErrorMessage(error, 'Error fetching collateral quote');
 

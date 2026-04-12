@@ -1,4 +1,4 @@
-import { useConnectModal, ConnectButton } from '@rainbow-me/rainbowkit';
+import { useConnectModal } from '@rainbow-me/rainbowkit';
 import { Heart, Wallet } from 'lucide-react';
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { AppHeader } from '@/components/app-header';
@@ -15,7 +15,7 @@ import { Button } from '../components/ui/button';
 const Dashboard = lazy(() => import('../components/dashboard'));
 
 export default function Welcome() {
-    const { account } = useWeb3();
+    const { account, connectWallet, isConnecting, isReconnecting } = useWeb3();
     const { activeCount, setSheetOpen } = useTransactionTracker();
     const { connectModalOpen } = useConnectModal();
     const { positionsByChain, donator, loading, error, lastFetch, refresh } = usePositions(account);
@@ -174,38 +174,18 @@ export default function Welcome() {
                                 {flipPhrase}
                             </p>
 
-                            <ConnectButton.Custom>
-                                {({ openConnectModal, authenticationStatus, mounted }) => {
-                                    const ready = mounted && authenticationStatus !== 'loading';
-                                    const isConnecting = !ready || connectModalOpen;
-
-                                    return (
-                                        <div
-                                            {...(!ready && {
-                                                'aria-hidden': true,
-                                                style: {
-                                                    opacity: 0,
-                                                    pointerEvents: 'none',
-                                                    userSelect: 'none',
-                                                },
-                                            })}
-                                        >
-                                            <Button
-                                                onClick={openConnectModal}
-                                                disabled={isConnecting}
-                                                className="text-sm px-6 py-2.5 rounded-xl h-auto flex items-center justify-center gap-2.5"
-                                            >
-                                                {isConnecting ? (
-                                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                                                ) : (
-                                                    <Wallet className="w-4 h-4" />
-                                                )}
-                                                <span>{isConnecting ? 'Connecting...' : 'Connect to start'}</span>
-                                            </Button>
-                                        </div>
-                                    );
-                                }}
-                            </ConnectButton.Custom>
+                            <Button
+                                onClick={connectWallet}
+                                disabled={connectModalOpen || isConnecting || isReconnecting}
+                                className="text-sm px-6 py-2.5 rounded-xl h-auto flex items-center justify-center gap-2.5"
+                            >
+                                {connectModalOpen || isConnecting || isReconnecting ? (
+                                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                    <Wallet className="w-4 h-4" />
+                                )}
+                                <span>{connectModalOpen || isConnecting || isReconnecting ? 'Connecting...' : 'Connect to start'}</span>
+                            </Button>
                         </div>
                     </div>
                 )}

@@ -95,7 +95,7 @@ const overviewItems = [
     },
     {
         key: 'power-used',
-        label: 'Power used',
+        label: 'Borrow used',
         value: (overview: PortfolioOverview) => getBorrowPowerUsedLabel(overview),
         accent: 'text-slate-900 dark:text-white',
         tooltip: 'Approximate share of your total borrowing power currently in use, based on supplied collateral and total borrowed amount across your active Aave markets.',
