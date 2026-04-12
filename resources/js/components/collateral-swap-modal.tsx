@@ -156,7 +156,7 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         let isMounted = true;
 
         async function fetchATokenAddress() {
-            if (!fromToken || !selectedNetwork || !publicClient) {
+            if (!isOpen || !fromToken || !selectedNetwork || !publicClient) {
                 setATokenAddress(null);
                 return;
             }
@@ -194,7 +194,34 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
 
         fetchATokenAddress();
         return () => { isMounted = false; };
-    }, [fromToken, selectedNetwork, publicClient]);
+    }, [fromToken, isOpen, selectedNetwork, publicClient]);
+
+    const activeSupplies = useMemo(() => {
+        const sourceSupplies = providedSupplies && providedSupplies.length > 0 ? providedSupplies : (supplies || []);
+
+        return sourceSupplies.filter((p: any) => p.amount && BigInt(p.amount) > BigInt(0));
+    }, [providedSupplies, supplies]);
+
+    const availableBalance = useMemo(() => {
+        if (!fromToken) {
+            return BigInt(0);
+        }
+
+        const pos = activeSupplies.find((p: any) => (p.address || p.underlyingAsset)?.toLowerCase() === (fromToken.address || fromToken.underlyingAsset)?.toLowerCase());
+
+        return pos ? BigInt((pos as any).amount || (pos as any).balance || 0) : BigInt(0);
+    }, [fromToken, activeSupplies]);
+
+    const formattedBalance = useMemo(() => {
+        if (!fromToken) {
+            return '0';
+        }
+
+        const pos = activeSupplies.find((p: any) => (p.address || p.underlyingAsset)?.toLowerCase() === (fromToken.address || fromToken.underlyingAsset)?.toLowerCase());
+
+        return (pos as any)?.formattedAmount || (pos as any)?.formattedBalance || '0';
+    }, [fromToken, activeSupplies]);
+    const isInsufficientBalance = swapAmount > (availableBalance || 0n);
 
     // Use Approval Hook for Collateral (aToken)
     const {
@@ -206,11 +233,12 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
         isApproved,
     } = useApprovalState({
         account,
-        tokenAddress: aTokenAddress,
-        spenderAddress: adapterAddress,
+        tokenAddress: isOpen ? aTokenAddress : null,
+        spenderAddress: isOpen ? adapterAddress : null,
         amountRequired: swapAmount,
         isDebt: false,
-        chainId: selectedNetwork.chainId
+        chainId: selectedNetwork.chainId,
+        enabled: isOpen,
     });
 
     const {
@@ -262,38 +290,6 @@ export const CollateralSwapModal: React.FC<CollateralSwapModalProps> = ({
             onClose();
         }
     });
-
-    // --- Computed ---
-
-    const activeSupplies = useMemo(() => {
-        const sourceSupplies = providedSupplies && providedSupplies.length > 0 ? providedSupplies : (supplies || []);
-
-        return sourceSupplies.filter((p: any) => p.amount && BigInt(p.amount) > BigInt(0));
-    }, [providedSupplies, supplies]);
-
-    const availableBalance = useMemo(() => {
-        if (!fromToken) {
-            return BigInt(0);
-        }
-
-        const pos = activeSupplies.find((p: any) => (p.address || p.underlyingAsset)?.toLowerCase() === (fromToken.address || fromToken.underlyingAsset)?.toLowerCase());
-
-        return pos ? BigInt((pos as any).amount || (pos as any).balance || 0) : BigInt(0);
-    }, [fromToken, activeSupplies]);
-
-    const formattedBalance = useMemo(() => {
-        if (!fromToken) {
-            return '0';
-        }
-
-        const pos = activeSupplies.find((p: any) => (p.address || p.underlyingAsset)?.toLowerCase() === (fromToken.address || fromToken.underlyingAsset)?.toLowerCase());
-
-        return (pos as any)?.formattedAmount || (pos as any)?.formattedBalance || '0';
-    }, [fromToken, activeSupplies]);
-
-    const isInsufficientBalance = swapAmount > (availableBalance || 0n);
-
-
 
     // --- Helpers ---
 

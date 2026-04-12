@@ -125,6 +125,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://etherscan.io',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://ethereum-rpc.publicnode.com',
                 'https://eth.drpc.org',
                 'https://eth.llamarpc.com'
             ],
@@ -156,6 +157,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://etherscan.io',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://ethereum-rpc.publicnode.com',
                 'https://eth.drpc.org'
             ],
             addresses: {
@@ -186,6 +188,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://optimistic.etherscan.io',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://optimism-rpc.publicnode.com',
                 'https://mainnet.optimism.io',
                 'https://optimism.drpc.org'
             ],
@@ -217,6 +220,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://bscscan.com',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://bsc-rpc.publicnode.com',
                 'https://bsc-dataseed.binance.org'
             ],
             addresses: {
@@ -247,6 +251,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://gnosisscan.io',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://gnosis-rpc.publicnode.com',
                 'https://rpc.gnosischain.com'
             ],
             addresses: {
@@ -277,6 +282,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://polygonscan.com',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://polygon-bor-rpc.publicnode.com',
                 'https://polygon-rpc.com'
             ],
             addresses: {
@@ -307,6 +313,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://sonicscan.org',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://sonic-rpc.publicnode.com:443',
                 'https://rpc.soniclabs.com'
             ],
             addresses: {
@@ -337,6 +344,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://basescan.org',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://base-rpc.publicnode.com',
                 'https://mainnet.base.org'
             ],
             addresses: {
@@ -367,6 +375,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://arbiscan.io',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://arbitrum-one-rpc.publicnode.com',
                 'https://arb1.arbitrum.io/rpc'
             ],
             addresses: {
@@ -397,6 +406,7 @@ export const MARKETS: Record<string, MarketConfig> = {
             explorer: 'https://snowtrace.io',
             rpcUrls: [
                 ...(alchemyUrl ? [alchemyUrl] : []),
+                'https://avalanche-c-chain-rpc.publicnode.com',
                 'https://api.avax.network/ext/bc/C/rpc'
             ],
             addresses: {

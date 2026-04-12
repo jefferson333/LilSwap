@@ -144,10 +144,10 @@ export const AaveHistorySheet: React.FC = () => {
                                 return (
                                     <div
                                         key={tx.hash}
-                                        className="p-4 px-6 transition-all hover:bg-slate-50 dark:hover:bg-slate-900/40 group animate-in fade-in slide-in-from-top-4 duration-500 fill-mode-both"
+                                        className="px-4 py-4 sm:px-6 transition-all hover:bg-slate-50 dark:hover:bg-slate-900/40 group animate-in fade-in slide-in-from-top-4 duration-500 fill-mode-both"
                                     >
-                                        <div className="flex items-start gap-4">
-                                            <div className="shrink-0 mt-1">
+                                        <div className="flex items-start gap-2.5 sm:gap-3">
+                                            <div className="hidden sm:block shrink-0 mt-1">
                                                 {tx.status === 'pending' && (
                                                     <div className="w-8 h-8 rounded-full bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
                                                         <RefreshCw className="w-4 h-4 text-amber-500 animate-spin" />
@@ -165,55 +165,13 @@ export const AaveHistorySheet: React.FC = () => {
                                                 )}
                                             </div>
 
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex justify-between items-center gap-3">
-                                                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                                        <p className="font-semibold text-sm text-slate-900 dark:text-white truncate shrink-0">
-                                                            {tx.description}
-                                                        </p>
+                                            <div className="flex-1 min-w-0 space-y-2">
+                                                <div className="flex min-w-0 items-center gap-3">
+                                                    <p className="min-w-0 truncate font-semibold text-sm text-slate-900 dark:text-white">
+                                                        {tx.description}
+                                                    </p>
 
-                                                        {(tx.fromTokenSymbol || tx.toTokenSymbol) && (
-                                                            <div className="flex items-center gap-1.5 shrink-0 ml-1">
-                                                                <div className="flex items-center gap-1">
-                                                                    <div className="w-4 h-4 rounded-full overflow-hidden shrink-0">
-                                                                        <img
-                                                                            src={getTokenLogo(tx.fromTokenSymbol || '')}
-                                                                            alt={tx.fromTokenSymbol}
-                                                                            className="w-full h-full object-cover"
-                                                                            onError={(e) => onTokenImgError(tx.fromTokenSymbol || '')(e as any)}
-                                                                        />
-                                                                    </div>
-                                                                    <span className="text-[11px] font-semibold text-slate-900 dark:text-white uppercase">{tx.fromTokenSymbol}</span>
-                                                                </div>
-
-                                                                <MoveRight className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500 opacity-60" strokeWidth={2.5} />
-
-                                                                <div className="flex items-center gap-1">
-                                                                    <div className="w-4 h-4 rounded-full overflow-hidden shrink-0">
-                                                                        <img
-                                                                            src={getTokenLogo(tx.toTokenSymbol || '')}
-                                                                            alt={tx.toTokenSymbol}
-                                                                            className="w-full h-full object-cover"
-                                                                            onError={(e) => onTokenImgError(tx.toTokenSymbol || '')(e as any)}
-                                                                        />
-                                                                    </div>
-                                                                    <span className="text-[11px] font-semibold text-slate-900 dark:text-white uppercase">{tx.toTokenSymbol}</span>
-                                                                </div>
-                                                            </div>
-                                                        )}
-                                                    </div>
-
-                                                    <button
-                                                        onClick={() => setShowAbsolute(!showAbsolute)}
-                                                        className="text-[10px] text-slate-400 hover:text-primary transition-colors whitespace-nowrap shrink-0 focus:outline-hidden"
-                                                        title={showAbsolute ? 'Show relative time' : 'Show full date'}
-                                                    >
-                                                        {formatTimestamp(tx.timestamp)}
-                                                    </button>
-                                                </div>
-
-                                                <div className="flex items-center gap-3 mt-2">
-                                                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md ${tx.status === 'pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400' :
+                                                    <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-sm ${tx.status === 'pending' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400' :
                                                         tx.status === 'success' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400' :
                                                             'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-400'
                                                         }`}>
@@ -226,8 +184,50 @@ export const AaveHistorySheet: React.FC = () => {
                                                                             'Failed')}
                                                     </span>
 
+                                                    <button
+                                                        onClick={() => setShowAbsolute(!showAbsolute)}
+                                                        className="ml-auto shrink-0 text-[10px] text-slate-400 hover:text-primary transition-colors whitespace-nowrap text-right focus:outline-hidden"
+                                                        title={showAbsolute ? 'Show relative time' : 'Show full date'}
+                                                    >
+                                                        {formatTimestamp(tx.timestamp)}
+                                                    </button>
+                                                </div>
+
+                                                <div className="flex min-w-0 items-center gap-4">
+                                                    {(tx.fromTokenSymbol || tx.toTokenSymbol) ? (
+                                                        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                                                            <div className="flex min-w-0 items-center gap-1">
+                                                                <div className="w-4 h-4 rounded-full overflow-hidden shrink-0">
+                                                                    <img
+                                                                        src={getTokenLogo(tx.fromTokenSymbol || '')}
+                                                                        alt={tx.fromTokenSymbol}
+                                                                        className="w-full h-full object-cover"
+                                                                        onError={(e) => onTokenImgError(tx.fromTokenSymbol || '')(e as any)}
+                                                                    />
+                                                                </div>
+                                                                <span className="truncate text-[11px] font-semibold text-slate-900 dark:text-white uppercase leading-none">{tx.fromTokenSymbol}</span>
+                                                            </div>
+
+                                                            <MoveRight className="w-3.5 h-3.5 shrink-0 text-slate-400 dark:text-slate-500 opacity-60" strokeWidth={2.5} />
+
+                                                            <div className="flex min-w-0 items-center gap-1">
+                                                                <div className="w-4 h-4 rounded-full overflow-hidden shrink-0">
+                                                                    <img
+                                                                        src={getTokenLogo(tx.toTokenSymbol || '')}
+                                                                        alt={tx.toTokenSymbol}
+                                                                        className="w-full h-full object-cover"
+                                                                        onError={(e) => onTokenImgError(tx.toTokenSymbol || '')(e as any)}
+                                                                    />
+                                                                </div>
+                                                                <span className="truncate text-[11px] font-semibold text-slate-900 dark:text-white uppercase leading-none">{tx.toTokenSymbol}</span>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="min-w-0" />
+                                                    )}
+
                                                     {network && (
-                                                        <span className="text-[10px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                                                        <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">
                                                             {network.shortLabel}
                                                         </span>
                                                     )}
@@ -237,7 +237,7 @@ export const AaveHistorySheet: React.FC = () => {
                                                             href={explorerUrl}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-primary transition-colors"
+                                                            className="ml-auto inline-flex shrink-0 items-center gap-1 text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500 hover:text-primary dark:text-slate-400 dark:hover:text-primary transition-colors"
                                                         >
                                                             View tx
                                                             <ExternalLink className="w-3 h-3" />

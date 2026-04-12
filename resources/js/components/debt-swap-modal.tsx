@@ -182,7 +182,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         let isMounted = true;
 
         async function fetchToDebtAddress() {
-            if (!toToken || !effectiveNetwork || !publicClient) {
+            if (!isOpen || !toToken || !effectiveNetwork || !publicClient) {
                 setToDebtTokenAddress(null);
                 return;
             }
@@ -233,7 +233,7 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
 
         fetchToDebtAddress();
         return () => { isMounted = false; };
-    }, [toToken, effectiveNetwork, publicClient]);
+    }, [toToken, isOpen, effectiveNetwork, publicClient]);
 
 
     // Use Approval Hook for ToToken Debt
@@ -246,11 +246,12 @@ export const DebtSwapModal: React.FC<DebtSwapModalProps> = ({
         cachedSignature
     } = useApprovalState({
         account,
-        tokenAddress: toDebtTokenAddress,
-        spenderAddress: adapterAddress,
+        tokenAddress: isOpen ? toDebtTokenAddress : null,
+        spenderAddress: isOpen ? adapterAddress : null,
         amountRequired: swapAmount, // We'll add buffer later in actions, but this gives a good indicator
         isDebt: true,
-        chainId: effectiveNetwork.chainId
+        chainId: effectiveNetwork.chainId,
+        enabled: isOpen,
     });
 
     const {
