@@ -33,6 +33,10 @@ Route::match(['get', 'post', 'put', 'delete'], '/transactions/{path}', function 
     return app(\App\Http\Controllers\ApiController::class)->proxy($request, "transactions/$path");
 })->middleware(['throttle:rpc', 'soft.abuse', 'proxy.auth'])->where('path', '.*');
 
+Route::match(['get', 'post', 'put', 'delete'], '/donations/{path}', function (\Illuminate\Http\Request $request, $path) {
+    return app(\App\Http\Controllers\ApiController::class)->proxy($request, "donations/$path");
+})->middleware(['throttle:rpc', 'soft.abuse', 'proxy.auth'])->where('path', '.*');
+
 // Alchemy RPC Proxy Route (Rate Limited)
 Route::post('/rpc/{slug}', [\App\Http\Controllers\AlchemyProxyController::class, 'proxy'])
     ->middleware(['throttle:rpc', 'soft.abuse', 'proxy.auth']);

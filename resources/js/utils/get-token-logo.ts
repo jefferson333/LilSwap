@@ -8,6 +8,7 @@ const ALIAS: Record<string, string> = {
     'USD₮0': 'usdt0',
     ONE_INCH: '1inch',
     MIMATIC: 'mai',
+    POL: 'wpol',
     USDCN: 'usdc',
     PT_EUSDE_14AUG2025: 'pteusde',
     PT_EUSDE_29MAY2025: 'pteusde',

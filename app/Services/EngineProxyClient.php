@@ -7,6 +7,8 @@ use Illuminate\Support\Facades\Http;
 
 class EngineProxyClient
 {
+    private const ENGINE_PROXY_TIMEOUT_SECONDS = 60;
+
     /**
      * Forward a signed JSON request to the Node engine.
      *
@@ -49,9 +51,10 @@ class EngineProxyClient
             'X-Internal-Nonce' => $nonce,
             'X-Log-Signature' => $isLogs ? $signature : null,
             'X-Log-Timestamp' => $isLogs ? $timestamp : null,
-        ], static fn ($value) => $value !== null && $value !== '');
+        ], static fn($value) => $value !== null && $value !== '');
 
         return Http::withHeaders($headers)
+            ->timeout(self::ENGINE_PROXY_TIMEOUT_SECONDS)
             ->withBody($bodyString, 'application/json')
             ->send($method, $fullUrl);
     }

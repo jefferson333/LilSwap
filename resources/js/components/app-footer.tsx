@@ -2,12 +2,21 @@ import { Coffee, Globe } from 'lucide-react';
 import React, { useState } from 'react';
 import { useApiMeta } from '../contexts/api-meta-context';
 import { DonateModal } from './donate-modal';
+import { VerifyDonationModal } from './verify-donation-modal';
 
 const APP_VERSION = __APP_VERSION__;
 
 const AppFooter: React.FC = () => {
     const { apiVersion } = useApiMeta();
     const [isDonateOpen, setIsDonateOpen] = useState(false);
+    const [isVerifyOpen, setIsVerifyOpen] = useState(false);
+    const [autoVerifyData, setAutoVerifyData] = useState<{ txHash: string; chainId: number } | null>(null);
+
+    const handleDonated = (txHash: string, chainId: number) => {
+        setIsDonateOpen(false);
+        setAutoVerifyData({ txHash, chainId });
+        setIsVerifyOpen(true);
+    };
 
     return (
         <footer className="relative z-40 bg-background-light dark:bg-background-dark">
@@ -112,7 +121,23 @@ const AppFooter: React.FC = () => {
                 </div>
             </div>
 
-            <DonateModal isOpen={isDonateOpen} onClose={() => setIsDonateOpen(false)} />
+            <DonateModal
+                isOpen={isDonateOpen}
+                onClose={() => setIsDonateOpen(false)}
+                onDonated={handleDonated}
+                onOpenVerify={() => setIsVerifyOpen(true)}
+            />
+
+            <VerifyDonationModal
+                isOpen={isVerifyOpen}
+                onClose={() => {
+                    setIsVerifyOpen(false);
+                    setAutoVerifyData(null);
+                }}
+                initialHash={autoVerifyData?.txHash}
+                initialChainId={autoVerifyData?.chainId}
+                onOpenDonate={() => setIsDonateOpen(true)}
+            />
         </footer>
     );
 };

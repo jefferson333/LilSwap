@@ -42,7 +42,7 @@ const projectId = import.meta.env.VITE_REOWN_PROJECT_ID;
 const chains = SUPPORTED_CHAINS;
 
 // Setup RainbowKit config with priority to Rabby and OneKey as requested
-const config = getDefaultConfig({
+export const wagmiConfig = getDefaultConfig({
     appName: 'LilSwap',
     projectId,
     chains,
@@ -106,7 +106,7 @@ export const Web3Provider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const { resolvedAppearance } = useAppearance();
 
     return (
-        <WagmiProvider config={config}>
+        <WagmiProvider config={wagmiConfig}>
             <QueryClientProvider client={queryClient}>
                 <RainbowKitProvider
                     theme={resolvedAppearance === 'dark' ? darkTheme() : lightTheme()}

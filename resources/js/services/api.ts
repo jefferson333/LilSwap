@@ -302,12 +302,45 @@ export const buildCollateralSwapTx = async (params: any) => {
     }
 };
 
+export const getDonationConfig = async () => {
+    const response = await apiClient.get('/donations/config');
+    return response.data;
+};
+
+export const getDonationPreflight = async (params: {
+    walletAddress: string;
+    chainId: number;
+    tokenKey: string;
+}) => {
+    const response = await apiClient.post('/donations/preflight', params);
+    return response.data;
+};
+
+export const verifyDonationByHash = async (params: { txHash: string; walletAddress?: string | null; chainId?: number | null }) => {
+    const response = await apiClient.post('/donations/verify-hash', params);
+    return response.data;
+};
+
+export const verifyDonationByWallet = async (params: {
+    walletAddress: string;
+    chainId: number;
+    tokenKey: string;
+    approximateSentAt: string;
+}) => {
+    const response = await apiClient.post('/donations/verify-wallet', params);
+    return response.data;
+};
+
 export default {
     getDebtQuote,
     buildDebtSwapTx,
     getCollateralQuote,
     buildCollateralSwapTx,
     getUserPosition,
+    getDonationConfig,
+    getDonationPreflight,
+    verifyDonationByHash,
+    verifyDonationByWallet,
     bootstrapProxySession,
     disconnectProxySession,
     revalidateSession,

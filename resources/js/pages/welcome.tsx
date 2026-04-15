@@ -9,6 +9,7 @@ import { useWeb3 } from '@/contexts/web3-context';
 import { usePositions } from '@/hooks/use-positions';
 import AppFooter from '../components/app-footer';
 import { DonateModal } from '../components/donate-modal';
+import { VerifyDonationModal } from '../components/verify-donation-modal';
 import LilLogo from '../components/lil-logo';
 import { Button } from '../components/ui/button';
 
@@ -20,6 +21,7 @@ export default function Welcome() {
     const { connectModalOpen } = useConnectModal();
     const { positionsByChain, donator, loading, error, lastFetch, refresh } = usePositions(account);
     const [isDonateOpen, setIsDonateOpen] = useState(false);
+    const [isVerifyOpen, setIsVerifyOpen] = useState(false);
     const [flipState, setFlipState] = useState<{ current: string; prev: string | null; key: number }>({
         current: 'Little', prev: null, key: 0,
     });
@@ -192,7 +194,24 @@ export default function Welcome() {
             </main>
 
             <AaveHistorySheet />
-            <DonateModal isOpen={isDonateOpen} onClose={() => setIsDonateOpen(false)} />
+            <DonateModal
+                isOpen={isDonateOpen}
+                onClose={() => setIsDonateOpen(false)}
+                onVerified={() => refresh(true)}
+                onOpenVerify={() => {
+                    setIsDonateOpen(false);
+                    setTimeout(() => setIsVerifyOpen(true), 150);
+                }}
+            />
+            <VerifyDonationModal
+                isOpen={isVerifyOpen}
+                onClose={() => setIsVerifyOpen(false)}
+                onVerified={() => refresh(true)}
+                onOpenDonate={() => {
+                    setIsVerifyOpen(false);
+                    setTimeout(() => setIsDonateOpen(true), 150);
+                }}
+            />
             <AppFooter />
         </div>
     );
