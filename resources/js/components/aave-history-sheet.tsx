@@ -3,7 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { getNetworkByChainId } from '../constants/networks';
 import { useTransactionTracker } from '../contexts/transaction-tracker-context';
 import { useAaveHistory } from '../hooks/use-aave-history';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { useWeb3 } from '../contexts/web3-context';
 import { getTokenLogo, onTokenImgError } from '../utils/get-token-logo';
 
@@ -105,6 +105,9 @@ export const AaveHistorySheet: React.FC = () => {
                             <History className="w-5 h-5 text-primary" />
                             Recent Activity
                         </SheetTitle>
+                        <SheetDescription className="sr-only">
+                            Your recent Aave transaction history and status updates.
+                        </SheetDescription>
                     </div>
                     <div className="flex justify-end mt-1 -mr-1">
                         <button

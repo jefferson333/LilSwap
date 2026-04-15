@@ -129,16 +129,22 @@ export const useAllPositions = (walletAddress: string | null, opts: { refreshInt
 
     // Handle global refresh events (e.g. from transaction tracker)
     useEffect(() => {
+        let debounceTimer: ReturnType<typeof setTimeout>;
+
         const handleRefresh = () => {
-            if (isTabVisible && isUserActive) {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
                 logger.debug('[useAllPositions] Global refresh event received, forcing fetch');
                 fetchPositions(true);
-            }
+            }, 300);
         };
 
         window.addEventListener('lilswap:refresh-positions', handleRefresh);
 
-        return () => window.removeEventListener('lilswap:refresh-positions', handleRefresh);
+        return () => {
+            clearTimeout(debounceTimer);
+            window.removeEventListener('lilswap:refresh-positions', handleRefresh);
+        };
     }, [fetchPositions, isTabVisible, isUserActive]);
 
 

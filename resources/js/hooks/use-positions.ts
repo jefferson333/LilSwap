@@ -76,7 +76,7 @@ export const usePositions = (walletAddress: string | null, opts: { refreshInterv
     }, [isProxyReady, normalizedWallet]);
 
     useEffect(() => {
-        if (!normalizedWallet || !isCurrentWalletPage || positionsPayload === undefined) {
+        if (!normalizedWallet || !isCurrentWalletPage) {
             setPositionsByChain(null);
             setDonator(EMPTY_DONATOR);
             setError(null);
@@ -84,10 +84,17 @@ export const usePositions = (walletAddress: string | null, opts: { refreshInterv
             return;
         }
 
+        if (positionsPayload === undefined) {
+            return;
+        }
+
         setDonator(positionsPayload.donator ?? EMPTY_DONATOR);
-        setPositionsByChain(positionsPayload.positionsByChain);
         setError(positionsPayload.error ?? null);
-        setLastFetch(Date.now());
+
+        if (positionsPayload.positionsByChain !== null) {
+            setPositionsByChain(positionsPayload.positionsByChain);
+            setLastFetch(Date.now());
+        }
     }, [isCurrentWalletPage, normalizedWallet, positionsPayload]);
 
     const reloadPositions = useCallback((force = false, includeWallet = false) => {
@@ -180,16 +187,22 @@ export const usePositions = (walletAddress: string | null, opts: { refreshInterv
     }, [isSettlingAccount, isTabVisible, isUserActive, lastFetch, opts.refreshIntervalMs, refresh, walletAddress]);
 
     useEffect(() => {
+        let debounceTimer: ReturnType<typeof setTimeout>;
+
         const handleRefresh = () => {
-            if (isTabVisible && isUserActive) {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
                 logger.debug('[usePositions] Global refresh event received, forcing reload');
                 void refresh(true);
-            }
+            }, 300);
         };
 
         window.addEventListener('lilswap:refresh-positions', handleRefresh);
 
-        return () => window.removeEventListener('lilswap:refresh-positions', handleRefresh);
+        return () => {
+            clearTimeout(debounceTimer);
+            window.removeEventListener('lilswap:refresh-positions', handleRefresh);
+        };
     }, [isTabVisible, isUserActive, refresh]);
 
     return {

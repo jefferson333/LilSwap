@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import '../css/app.css';
 
 import { ApiMetaProvider } from '@/contexts/api-meta-context';
+import { DonationVerificationProvider } from '@/contexts/donation-verification-context';
 import { ToastProvider } from '@/contexts/toast-context';
 import { TransactionTrackerProvider } from '@/contexts/transaction-tracker-context';
 import { UserActivityProvider } from '@/contexts/user-activity-context';
@@ -33,13 +34,15 @@ createInertiaApp({
                         initialApiStatus={initialApiMeta.isUp ?? true}
                     >
                         <UserActivityProvider>
-                            <ToastProvider>
-                                <TransactionTrackerProvider>
-                                    <TooltipProvider delayDuration={120}>
-                                        <App {...props} />
-                                    </TooltipProvider>
-                                </TransactionTrackerProvider>
-                            </ToastProvider>
+                                <ToastProvider>
+                                    <DonationVerificationProvider>
+                                        <TransactionTrackerProvider>
+                                            <TooltipProvider delayDuration={120}>
+                                                <App {...props} />
+                                            </TooltipProvider>
+                                        </TransactionTrackerProvider>
+                                    </DonationVerificationProvider>
+                                </ToastProvider>
                         </UserActivityProvider>
                     </ApiMetaProvider>
                 </StrictMode>
